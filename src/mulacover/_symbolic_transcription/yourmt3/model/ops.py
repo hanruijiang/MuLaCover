@@ -13,26 +13,12 @@
 import torch
 import torch.nn as nn
 from einops import rearrange
-from .t5_compat import T5LayerNorm as RMSNorm
 
 
 def get_layer_norm(
     dim: int, layer_norm_type: str = "layer_norm", layer_norm_eps: float = 1e-5
 ):
-    """Get layer normalization layer.
-    Args:
-        dim (int): Feature dimension
-        layer_norm_type (str): "layer_norm" or "rms_norm"
-        layer_norm_eps (float): Epsilon value for numerical stability
-
-    Returns:
-        nn.Module: Layer normalization layer
-    """
-    if layer_norm_type == "rms_norm":
-        # T5LayerNorm is equivalent to RMSNorm. https://arxiv.org/abs/1910.07467
-        return RMSNorm(hidden_size=dim, eps=layer_norm_eps)
-    else:
-        return nn.LayerNorm(normalized_shape=dim, eps=layer_norm_eps)
+    return nn.LayerNorm(normalized_shape=dim, eps=layer_norm_eps)
 
 
 def minmax_normalize(x: torch.Tensor, eps: float = 0.008) -> torch.FloatTensor:

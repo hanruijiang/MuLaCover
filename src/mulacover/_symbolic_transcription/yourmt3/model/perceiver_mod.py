@@ -7,25 +7,17 @@
 #     http://www.apache.org/licenses/LICENSE-2.0
 #
 # Please see the details in the LICENSE file.
-"""perceiver_mod.py
-
-Implementation of the PerceiverTF encoder with:
-- AliBi positional bias
-- Mixtral of Experts (MoE) feedforward layer
-
-"""
+"""Perceiver-TF encoder with rotary embeddings and MoE feedforward layers."""
 
 import math
 from einops import rearrange
-from typing import Optional, Tuple, Union, Literal
+from typing import Optional, Tuple, Union
 
 import torch
 from torch import nn
 from transformers.models.perceiver.modeling_perceiver import PerceiverSelfOutput
 from transformers.pytorch_utils import (
     apply_chunking_to_forward,
-    find_pruneable_heads_and_indices,
-    prune_linear_layer,
 )
 from mulacover._symbolic_transcription.yourmt3.model.perceiver_helper import (
     MoEModelOutputWithCrossAttentions,
@@ -35,7 +27,6 @@ from mulacover._symbolic_transcription.yourmt3.model.perceiver_helper import (
     PerceiverTFConfig,
 )
 from mulacover._symbolic_transcription.yourmt3.model.positional_encoding import (
-    AlibiPositionalBias,
     get_rotary_emb,
 )
 from mulacover._symbolic_transcription.yourmt3.model.ops import get_layer_norm
@@ -57,50 +48,6 @@ class PerceiverEmbeddings(nn.Module):
 
     def forward(self, batch_size: int):
         return self.latents.expand(batch_size, -1, -1)
-
-
-class PerceiverTFTrainablePE(nn.Module):
-    """Construct the trainable absolute positional embeddings."""
-
-    def __init__(
-        self,
-        position_encoding_type: Literal["trainable", "tkd", "td", "tk", "kdt"],
-        max_t: int,
-        k: int,
-        d: int,
-    ) -> None:
-        super().__init__()
-        self.position_encoding_type = position_encoding_type
-        self.max_t = max_t
-        self.k = k
-        self.d = d
-
-        if position_encoding_type in ["trainable", "tkd"]:
-            self._pos_emb = nn.Parameter(torch.randn(max_t, k, d))
-        elif position_encoding_type == "td":
-            self._pos_emb = nn.Parameter(torch.randn(max_t, d))
-        elif position_encoding_type == "tk":
-            self._pos_emb = nn.Parameter(torch.randn(max_t, k))
-        elif position_encoding_type == "kdt":
-            self._pos_emb = nn.Parameter(torch.randn(k, d))
-            self._pos_emb_temporal = nn.Parameter(torch.randn(max_t, d))
-        else:
-            raise ValueError(f"unknown position encoding type {position_encoding_type}")
-
-    def forward(self):
-        pos_emb_temporal = None
-
-        if self.position_encoding_type in ["trainable", "tkd"]:
-            pos_emb = self._pos_emb
-        elif self.position_encoding_type == "td":
-            pos_emb = self._pos_emb.unsqueeze(1).expand(-1, self.k, -1)
-        elif self.position_encoding_type == "tk":
-            pos_emb = self._pos_emb.unsqueeze(-1).expand(-1, -1, self.d)
-        elif self.position_encoding_type == "kdt":
-            pos_emb = self._pos_emb.unsqueeze(0).expand(self.max_t, -1, -1)
-            pos_emb_temporal = self._pos_emb_temporal
-
-        return pos_emb, pos_emb_temporal
 
 
 class PerceiverAlibiSelfAttention(nn.Module):
@@ -166,23 +113,7 @@ class PerceiverAlibiSelfAttention(nn.Module):
 
         self.dropout = nn.Dropout(config.dropout_rate)
 
-        # (Modified) Alibi positional bias
-        if config.position_encoding_type == "alibi":
-            self.alibi_bias = AlibiPositionalBias(
-                heads=num_heads, total_heads=num_heads, trainable_slope=False
-            )
-        elif config.position_encoding_type == "alibit":
-            self.alibi_bias = AlibiPositionalBias(
-                heads=num_heads, total_heads=num_heads, trainable_slope=True
-            )
-        else:
-            self.alibi_bias = None
-        # (Modified) RoPE
-        if config.position_encoding_type == "rope":
-            assert rotary_emb is not None, "rotary_emb must be provided for RoPE."
-            self.rotary_emb = rotary_emb
-        else:
-            self.rotary_emb = None
+        self.rotary_emb = rotary_emb
         self.rope_apply_to_keys = config.rope_apply_to_keys  # False by default
 
     def transpose_for_scores(self, x, channels_per_head):
@@ -229,13 +160,6 @@ class PerceiverAlibiSelfAttention(nn.Module):
 
         # Take the dot product between the queries and keys to get the raw attention scores.
         attention_scores = torch.matmul(queries, keys.transpose(-1, -2))
-
-        # (Modified) Alibi positional bias
-        if self.alibi_bias is not None:
-            batch_size, num_heads, q_seq_len, k_seq_len = attention_scores.shape
-            attention_scores += self.alibi_bias(
-                q_seq_len, k_seq_len
-            )  # auto-broadcasting to (b, num_heads, q_seq_len, k_seq_len)
 
         _, _, _, q_head_dim = queries.shape
         _, _, _, v_head_dim = values.shape
@@ -327,31 +251,6 @@ class PerceiverAlibiAttention(nn.Module):
             config, input_channels=self.self.v_channels, output_channels=output_channels
         )
         self.use_query_residual = use_query_residual
-        self.pruned_heads = set()
-
-    def prune_heads(self, heads):
-        if len(heads) == 0:
-            return
-        heads, index = find_pruneable_heads_and_indices(
-            heads,
-            self.self.num_attention_heads,
-            self.self.attention_head_size,
-            self.pruned_heads,
-        )
-
-        # Prune linear layers
-        self.self.query = prune_linear_layer(self.self.query, index)
-        self.self.key = prune_linear_layer(self.self.key, index)
-        self.self.value = prune_linear_layer(self.self.value, index)
-        self.output.dense = prune_linear_layer(self.output.dense, index, dim=1)
-
-        # Update hyper params and store pruned heads
-        self.self.num_attention_heads = self.self.num_attention_heads - len(heads)
-        self.self.all_head_size = (
-            self.self.attention_head_size * self.self.num_attention_heads
-        )
-        self.pruned_heads = self.pruned_heads.union(heads)
-
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -571,7 +470,6 @@ class PerceiverTFEncoderBlock(nn.Module):
         temporal_attention_mask: Optional[torch.FloatTensor] = None,
         local_head_mask: Optional[torch.FloatTensor] = None,
         temporal_head_mask: Optional[torch.FloatTensor] = None,
-        pos_emb_temporal: Optional[torch.FloatTensor] = None,
         output_attentions: Optional[bool] = False,
         output_hidden_states: Optional[bool] = False,
         output_router_logits: Optional[bool] = False,  # Only used for MoE.
@@ -601,8 +499,6 @@ class PerceiverTFEncoderBlock(nn.Module):
                 By default, None.
             temporal_head_mask:
                 By default, None.
-            pos_emb_temporal:
-                Optioanl. Used for temporal self-attention. By default, None. (max_t, num_latents, d_latents)
             output_attentions: bool
                 Whether to return attentions weights.
             output_hidden_states: bool
@@ -681,12 +577,6 @@ class PerceiverTFEncoderBlock(nn.Module):
             layer_head_mask = (
                 temporal_head_mask[i] if temporal_head_mask is not None else None
             )
-
-            if i == 0 and pos_emb_temporal is not None:
-                # Add temporal positional embeddings to the hidden_states.
-                hidden_states = (
-                    hidden_states + pos_emb_temporal[:t]
-                )  # pos_emb_temporal: (T, D)
 
             layer_outputs = layer_module(
                 hidden_states,
@@ -767,50 +657,24 @@ class PerceiverTFEncoder(PerceiverTFPreTrainedModel):
         # Construct a latent array.
         self.latent_array = PerceiverEmbeddings(config)  # (num_latents, d_latents)
 
-        # Positional embeddings for the latent array.
-        if self.position_encoding_type == "rope":
-            # (Modified) RoPE
-            self.rotary_emb_sca = get_rotary_emb(
-                config.num_cross_attention_heads,
-                config.rope_type_sca,
-                config.rope_partial_pe,
-                config.rope_trainable,
-            )
-            self.rotary_emb_latent = get_rotary_emb(
-                config.num_cross_attention_heads,
-                config.rope_type_latent,
-                config.rope_partial_pe,
-                config.rope_trainable,
-            )
-            self.rotary_emb_temporal = get_rotary_emb(
-                config.num_cross_attention_heads,
-                config.rope_type_temporal,
-                config.rope_partial_pe,
-                config.rope_trainable,
-            )
-        else:
-            self.rotary_emb_sca = None
-            self.rotary_emb_latent = None
-            self.rotary_emb_temporal = None
-
-        if self.position_encoding_type in ["alibi", "alibit", "rope", None]:
-            # alibi is imeplemented within PerceiverAlibiSelfAttention, and activated by config.
-            # RoPE is implemented without using self.pos_emb.
-            self.pos_emb = None
-        else:
-            k, d = self.latent_array.latents.size()
-            max_t = (
-                int(config.num_max_positions) + 10
-            )  # 10 is headroom for future task tokens...
-            self.pos_emb = PerceiverTFTrainablePE(
-                self.position_encoding_type, max_t, k, d
-            )
-            """
-            self.pos_emb() returns:
-                pos_emb: (max_t, K, D)
-                pos_emb_temporal: (max_t, K, D)
-            """
-
+        self.rotary_emb_sca = get_rotary_emb(
+            config.num_cross_attention_heads,
+            config.rope_type_sca,
+            config.rope_partial_pe,
+            config.rope_trainable,
+        )
+        self.rotary_emb_latent = get_rotary_emb(
+            config.num_cross_attention_heads,
+            config.rope_type_latent,
+            config.rope_partial_pe,
+            config.rope_trainable,
+        )
+        self.rotary_emb_temporal = get_rotary_emb(
+            config.num_cross_attention_heads,
+            config.rope_type_temporal,
+            config.rope_partial_pe,
+            config.rope_trainable,
+        )
         # Construct the encoder blocks.
         blocks = []
         for _ in range(config.num_blocks):
@@ -834,19 +698,7 @@ class PerceiverTFEncoder(PerceiverTFPreTrainedModel):
     def set_input_embeddings(self, value):
         self.latent_array.latents = value
 
-    """temporary fix for torch.compile issue"""
-
     def forward(self, **kwargs):
-        if self.training is True:
-            return self._forward_compile(**kwargs)
-        else:
-            return self._forward_no_compile(**kwargs)
-
-    def _forward_no_compile(self, **kwargs):
-        return self._forward(**kwargs)
-
-    @torch.compile
-    def _forward_compile(self, **kwargs):
         return self._forward(**kwargs)
 
     def _forward(
@@ -919,14 +771,6 @@ class PerceiverTFEncoder(PerceiverTFPreTrainedModel):
             -1, t, -1, -1
         )
 
-        # Add positional embeddings to the expanded latent embeddings: (B, T, K, D)
-        if self.pos_emb is not None:
-            pos_emb_latent, pos_emb_temporal = self.pos_emb.forward()
-            expanded_latent_embeddings = expanded_latent_embeddings + pos_emb_latent[:t]
-            # (max_t, K, D) -> (T, K, D) -> (B, T, K, D) auto-broadcasting
-        else:
-            pos_emb_temporal = None
-
         # Lists to store intermediate outputs if required
         all_hidden_states = []
         all_attentions = []
@@ -945,7 +789,6 @@ class PerceiverTFEncoder(PerceiverTFPreTrainedModel):
                 temporal_attention_mask=temporal_attention_mask,
                 local_head_mask=local_head_mask,
                 temporal_head_mask=temporal_head_mask,
-                pos_emb_temporal=pos_emb_temporal if i == 0 else None,
                 output_attentions=output_attentions,
                 output_hidden_states=output_hidden_states,
                 output_router_logits=output_router_logits,
