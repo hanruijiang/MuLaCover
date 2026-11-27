@@ -442,7 +442,6 @@ class MultiChannelT5Decoder(T5PreTrainedModel):
 
     def _forward(
         self,
-        # input_ids: torch.LongTensor, # removed since embed_tokens is outside the decoder
         inputs_embeds: Optional[torch.FloatTensor] = None,
         attention_mask: Optional[torch.FloatTensor] = None,  # decoder_attention_mask
         encoder_attention_mask: Optional[torch.FloatTensor] = None,
@@ -514,5 +513,3 @@ class MultiChannelT5Decoder(T5PreTrainedModel):
         else:
             return decoder_outputs  # ['last_hidden_state']: (B, K, T, D)
 
-    # out['last_hidden_state']: (B, K, T, D)
-    # out['past_key_values']: Tuple[Tuple[torch.Tensor]]

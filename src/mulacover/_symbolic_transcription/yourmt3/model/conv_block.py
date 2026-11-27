@@ -43,7 +43,7 @@ class Res2DAVPBlock(nn.Module):
     def __init__(
         self, in_channels, out_channels, kernel_size, avp_kernel_size, activation
     ):
-        """Convolutional residual block modified fromr bytedance/music_source_separation."""
+        """Convolutional residual block adapted from bytedance/music_source_separation."""
         super().__init__()
 
         padding = kernel_size[0] // 2, kernel_size[1] // 2

@@ -1,4 +1,4 @@
-"""Audio-to-chord inference without the upstream training runtime."""
+"""Audio-to-chord inference."""
 
 from pathlib import Path
 from typing import List, Tuple, Union

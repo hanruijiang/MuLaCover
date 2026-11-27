@@ -6,6 +6,7 @@ import math
 from pathlib import Path
 from typing import Optional
 
+import mido
 import torch
 
 MAX_SYMBOLIC_LENGTH = 5000
@@ -29,7 +30,7 @@ _ROOTS = {
     "Bb": 10,
     "B": 11,
 }
-# Exact matches precede the ordered prefix fallback used during model training.
+# Exact chord names take precedence over prefix matches.
 _CHORD_INTERVALS = {
     "maj": (0, 4, 7),
     "min": (0, 3, 7),
@@ -42,16 +43,6 @@ _CHORD_INTERVALS = {
     "sus4": (0, 5, 7),
     "5": (0, 7),
 }
-
-
-def _load_mido():
-    try:
-        import mido
-    except ImportError as error:
-        raise ImportError(
-            "MIDI conditioning requires mido. Install it with `pip install mido`."
-        ) from error
-    return mido
 
 
 def _empty_notes():
@@ -105,7 +96,7 @@ def _validate_triplets(value, name, chord=False):
         raise ValueError(f"{name} MIDI pitches must be between 0 and 127.")
     if chord:
         notes = notes[notes[:, 2] > 0]
-    # Check before conversion to int64 or dense allocation, including huge inputs.
+    # Bound the symbolic sequence before dense allocation.
     if (notes[:, (0, 2)] > MAX_SYMBOLIC_LENGTH).any() or (
         notes[:, 0] + notes[:, 2] > MAX_SYMBOLIC_LENGTH
     ).any():
@@ -141,7 +132,6 @@ def _chord_pitches(label):
 
 
 def _read_midi(path, include_drum_channel=False):
-    mido = _load_mido()
     path = Path(path)
     if not path.is_file():
         raise FileNotFoundError(f"MIDI file does not exist: {path}")
@@ -293,7 +283,6 @@ class SymbolicCondition:
     def save_midi(self, directory):
         """Export the exact model condition as three replayable MIDI files."""
         self.__post_init__()
-        mido = _load_mido()
         directory = Path(directory)
         bpm = self.bpm if self.bpm is not None else 120.0
         tempo = mido.bpm2tempo(bpm)

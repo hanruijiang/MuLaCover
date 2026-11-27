@@ -152,7 +152,6 @@ class PerceiverAlibiSelfAttention(nn.Module):
         keys = self.transpose_for_scores(keys, self.qk_channels_per_head)
         values = self.transpose_for_scores(values, self.v_channels_per_head)
 
-        # (Modified) RoPE
         if self.rotary_emb is not None:
             queries = self.rotary_emb.apply_rotary_custom(queries)
             if self.rope_apply_to_keys is True:
@@ -174,8 +173,6 @@ class PerceiverAlibiSelfAttention(nn.Module):
         # Normalize the attention scores to probabilities.
         attention_probs = nn.Softmax(dim=-1)(attention_scores)
 
-        # This is actually dropping out entire tokens to attend to, which might
-        # seem a bit unusual, but is taken from the original Transformer paper.
         attention_probs = self.dropout(attention_probs)
 
         # Mask heads if we want to
@@ -272,7 +269,7 @@ class PerceiverAlibiAttention(nn.Module):
         # Output projection
         attention_output = self.output(self_outputs[0])
 
-        # Optionally include a residual to the original queries.
+        # Add the query residual when enabled.
         # Consider omitting the residual if the semantics of query and output
         # are different, e.g. if queries are positions and outputs are pixels.
         if self.use_query_residual:
@@ -423,7 +420,7 @@ class PerceiverTFEncoderBlock(nn.Module):
             kv_dim=kv_dim,
             use_query_residual=sca_use_query_residual,
             rotary_emb=rotary_emb_sca,
-        )  # (Modified) RoPE
+        )
 
         # Local latent trasformer layers.
         local_transformer_layers = []
@@ -438,7 +435,7 @@ class PerceiverTFEncoderBlock(nn.Module):
                 kv_dim=config.d_model,
                 widening_factor=config.ff_widening_factor,
                 use_query_residual=config.use_query_residual,
-                rotary_emb=rotary_emb_latent,  # (Modified) RoPE
+                rotary_emb=rotary_emb_latent,
             )
             local_transformer_layers.append(layer)
         self.local_transformer = nn.ModuleList(local_transformer_layers)
@@ -456,7 +453,7 @@ class PerceiverTFEncoderBlock(nn.Module):
                 kv_dim=config.d_model,
                 widening_factor=config.ff_widening_factor,
                 use_query_residual=config.use_query_residual,
-                rotary_emb=rotary_emb_temporal,  # (Modified) RoPE
+                rotary_emb=rotary_emb_temporal,
             )
             temporal_transformer_layers.append(layer)
         self.temporal_transformer = nn.ModuleList(temporal_transformer_layers)
@@ -518,13 +515,6 @@ class PerceiverTFEncoderBlock(nn.Module):
 
         # Collect dimension info
         batch_size, t, num_latents, d_latents = hidden_states.size()  # (B, T, K, D)
-
-        # if self.sca_attention_to_channel:
-        #     _, _, _, f = inputs.size()  # (B, T, C, F)
-        #     assert d_latents == f, "d_latents must be equal to kv_dim, which is input frequency dim."
-        # else:
-        #     _, _, _, c = inputs.size()  # (B, T, F, C)
-        #     assert d_latents == c, "d_latents must be equal to kv_dim, which is input channels."
 
         # Reshape (B, T, _, _) to (B*T, _, _) for SCA and local transformer.
         hidden_states = rearrange(hidden_states, "b t k d -> (b t) k d")
@@ -682,7 +672,7 @@ class PerceiverTFEncoder(PerceiverTFPreTrainedModel):
                 config,
                 kv_dim=config.kv_dim,
                 sca_use_query_residual=sca_use_query_residual,
-                rotary_emb_sca=self.rotary_emb_sca,  # (Modified) RoPE
+                rotary_emb_sca=self.rotary_emb_sca,
                 rotary_emb_latent=self.rotary_emb_latent,
                 rotary_emb_temporal=self.rotary_emb_temporal,
             )
@@ -761,7 +751,6 @@ class PerceiverTFEncoder(PerceiverTFPreTrainedModel):
             self.config.num_blocks * self.config.num_temporal_transformers_per_block,
         )
 
-        # Prepare attention mask: not implemented
 
         # Expand the latent embeddings by t: (B, K, D) --> (B, T, K, D)
         latent_embeddings = self.latent_array(

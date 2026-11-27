@@ -223,19 +223,11 @@ class MuLaCoverGenPipeline:
         topk = kwargs.get("topk", 250)
         duration = kwargs.get("max_audio_length_ms", DEFAULT_MAX_AUDIO_LENGTH_MS)
         for name, value in (("cfg_scale", cfg_scale), ("temperature", temperature)):
-            if (
-                not isinstance(value, (int, float))
-                or not math.isfinite(value)
-                or value <= 0
-            ):
+            if not math.isfinite(value) or value <= 0:
                 raise ValueError(f"{name} must be finite and positive")
-        if (
-            isinstance(topk, bool)
-            or not isinstance(topk, int)
-            or not 1 <= topk <= self.model_config.audio_vocab_size
-        ):
+        if not 1 <= topk <= self.model_config.audio_vocab_size:
             raise ValueError("topk must be between 1 and the audio vocabulary size")
-        if isinstance(duration, bool) or not isinstance(duration, int) or duration < 80:
+        if duration < 80:
             raise ValueError("max_audio_length_ms must be an integer of at least 80")
         return (
             {

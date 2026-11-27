@@ -14,7 +14,6 @@ from torch import nn
 from mulacover._symbolic_transcription.yourmt3.model.t5mod import (
     MultiChannelT5Decoder,
 )
-from typing import Optional
 
 
 @torch.no_grad()
@@ -24,19 +23,13 @@ def task_cond_dec_generate(
     lm_head: nn.Module,
     encoder_hidden_states: torch.FloatTensor,
     max_length: int = 1024,
-    stop_at_eos: bool = True,
-    eos_id: Optional[int] = 1,
-    pad_id: Optional[int] = 0,
-    decoder_start_token_id: Optional[int] = 0,
 ) -> torch.LongTensor:
     """Generate event IDs with the multi-channel decoder and KV cache."""
     bsz = encoder_hidden_states.shape[0]
     device = encoder_hidden_states.device
 
     dec_input_shape = (bsz, decoder.num_channels, 1)
-    dec_input_ids = torch.tile(
-        torch.LongTensor([decoder_start_token_id]).to(device), dec_input_shape
-    )
+    dec_input_ids = torch.zeros(dec_input_shape, dtype=torch.long, device=device)
     dec_inputs_embeds = embed_tokens(dec_input_ids)  # (B, L, D) or (B, C, L, D)
 
     dec_hs, past_key_values = decoder(
@@ -66,20 +59,11 @@ def task_cond_dec_generate(
         _pred_ids = logits.argmax(-1)  # (B, 1) or (B, K, 1)
 
         # update input_ids and past_key_values for next iteration
-        dec_input_ids = (
-            _pred_ids.clone()
-        )  # (B, 1) or (B, C, 1), deepcopy of _pred_ids because _pred_ids will be modified for finished sentences
+        dec_input_ids = _pred_ids.clone()
         past_key_values = _past_key_values
 
         # finished sentences should have their next token be a padding token
-        if eos_id is not None:
-            if pad_id is None:
-                raise ValueError(
-                    "If `eos_token_id` is defined, make sure that `pad_token_id` is defined."
-                )
-            _pred_ids = _pred_ids * unfinished_sequences + pad_id * (
-                1 - unfinished_sequences
-            )
+        _pred_ids = _pred_ids * unfinished_sequences
 
         # update pred_ids
         pred_ids = torch.cat(
@@ -87,11 +71,8 @@ def task_cond_dec_generate(
         )  # (B, T') or (B, C, T') with increasing T'
 
         # update state of unfinished_sequences
-        if eos_id is not None:
-            unfinished_sequences = unfinished_sequences * _pred_ids.ne(eos_id).long()
-
-            # early-stop when each sentence is finished
-            if stop_at_eos is True and unfinished_sequences.max() == 0:
-                break
+        unfinished_sequences = unfinished_sequences * _pred_ids.ne(1).long()
+        if unfinished_sequences.max() == 0:
+            break
 
     return pred_ids  # (B, L) or (B, C, L)

@@ -477,8 +477,7 @@ class MuLaCover(PreTrainedModel):
             pianoroll = _mask_condition(pianoroll, uncond_mask)
             drum_pianoroll = _mask_condition(drum_pianoroll, uncond_mask)
             chord = _mask_condition(chord, uncond_mask)
-            # Match the original float-mask arithmetic, including promotion
-            # of BF16 inputs. This is raw Qwen, not its prefix projection.
+            # Apply classifier-free guidance to the raw Qwen style embedding.
             style_mask = uncond_mask.view(batch_size, 1, 1).float()
             style_embedding = (
                 style_embedding * (1 - style_mask)

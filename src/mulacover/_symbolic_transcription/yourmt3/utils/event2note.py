@@ -153,7 +153,6 @@ def event2note_event(
                 elif velocity_state == 0 and (program_state, e.value) in last_activity:
                     last_activity.remove((program_state, e.value))
                 else:
-                    # print(f'tick_state: {tick_state}') # <-- This displays unresolved offset errors!!
                     raise ValueError("Err/Note off without note on")
                 note_events.append(
                     NoteEvent(

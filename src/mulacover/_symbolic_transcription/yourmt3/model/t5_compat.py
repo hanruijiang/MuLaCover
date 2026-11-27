@@ -61,9 +61,7 @@ class T5DenseGatedActDense(nn.Module):
         hidden_states = hidden_gelu * hidden_linear
         hidden_states = self.dropout(hidden_states)
 
-        # To make 8bit quantization work for google/flan-t5-xxl, self.wo is kept in float32.
-        # See https://github.com/huggingface/transformers/issues/20287
-        # we also make sure the weights are not in `int8` in case users will force `_keep_in_fp32_modules` to be `None``
+        # Match the output projection dtype.
         if (
             isinstance(self.wo.weight, torch.Tensor)
             and hidden_states.dtype != self.wo.weight.dtype
@@ -260,8 +258,6 @@ class T5Attention(nn.Module):
                     # (batch_size, n_heads, key_length, dim_per_head)
                     hidden_states = torch.cat([past_key_value, hidden_states], dim=2)
                 elif past_key_value.shape[2] != key_value_states.shape[1]:
-                    # checking that the `sequence_length` of the `past_key_value` is the same as
-                    # the provided `key_value_states` to support prefix tuning
                     # cross-attn
                     # (batch_size, n_heads, seq_length, dim_per_head)
                     hidden_states = shape(proj_layer(key_value_states))
@@ -292,7 +288,7 @@ class T5Attention(nn.Module):
         # compute scores
         scores = torch.matmul(
             query_states, key_states.transpose(3, 2)
-        )  # equivalent of torch.einsum("bnqd,bnkd->bnqk", query_states, key_states), compatible with onnx op>9
+        )
 
         if position_bias is None:
             if not self.has_relative_attention_bias:
