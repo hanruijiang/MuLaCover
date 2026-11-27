@@ -20,42 +20,6 @@ from mulacover._symbolic_transcription.yourmt3.utils.utils import (
     create_program2channel_vocab,
 )
 
-SINGING_PROGRAM = 100
-DRUM_PROGRAM = 128
-UNANNOTATED_PROGRAM = 129
-
-# import random
-# class RandomProgramSampler:
-#     def __init__(self, program_vocab: Dict[str, int], max_n: int = 7):
-#         for key, values in program_vocab.items():
-#             for value in values:
-#                 self.inverse_vocab_program[value] = values[0]
-#         self.max_n = max_n
-#         self.shuffled_
-
-#     def sample(self):
-
-# def shuffle_and_repeat_randomly(lst, max_n=5):
-#     shuffled = lst.copy()
-#     random.shuffle(shuffled)
-#     index = 0
-
-#     while True:
-#         if index >= len(shuffled):  # 리스트의 모든 요소가 사용되면, 다시 셔플
-#             random.shuffle(shuffled)
-#             index = 0
-
-#         n = random.randint(1, max_n)  # 1과 max_n 사이의 랜덤한 개수 결정
-#         end_index = index + n
-
-#         if end_index > len(shuffled):  # 리스트의 끝을 넘어가는 경우, 리스트의 끝까지만 반환
-#             yield shuffled[index:]
-#             index = len(shuffled)
-#         else:
-#             yield shuffled[index:end_index]
-#             index = end_index
-
-
 class TaskManager:
     """
     The TaskManager class manages tasks for training. It is initialized with a task name and retrieves
@@ -87,7 +51,7 @@ class TaskManager:
 
     def __init__(
         self,
-        task_name: str = "mt3_full_plus",
+        task_name: str = "mc13_full_plus_256",
         max_shift_steps: int = 206,
         debug_mode: bool = False,
     ):

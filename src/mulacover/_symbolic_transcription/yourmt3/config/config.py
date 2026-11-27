@@ -2,8 +2,8 @@
 
 audio_cfg = {
     # Overwrittable by args in train.py
-    "codec": "melspec",  # {melspec, spec} melspec for MT3, spec for PerceiverTF
-    "hop_length": 128,  # {128, 300} 128 for MT3, 300 for PerceiverTF
+    "codec": "spec",
+    "hop_length": 300,
     # Shared audio parameters
     "audio_backend": "torchaudio",  # {torchaudio, nnAudio}
     "sample_rate": 16000,
@@ -15,20 +15,12 @@ audio_cfg = {
 }  # TODO: currently dataloader is not updated by "input_frames"
 
 model_cfg = {
-    "encoder_type": "t5",  # {"t5", "perceiver-tf", "conformer"}
-    "decoder_type": "t5",  # {"t5", "multi-t5"}
+    "encoder_type": "perceiver-tf",
+    "decoder_type": "multi-t5",
     "pre_encoder_type": "default",  # {None, "default", "conv", "conv1d", "conv2d_avpt"} by default, t5:None, perceiver:conv.
-    "pre_encoder_type_default": {"t5": None, "perceiver-tf": "conv", "conformer": None},
+    "pre_encoder_type_default": {"perceiver-tf": "conv"},
+    "pre_decoder_type_default": {"perceiver-tf": {"multi-t5": "mc_shared_linear"}},
     "pre_decoder_type": "default",  # {None, 'linear', 'conv1', 'mlp', 'group_linear'} see model/projection_layer.py
-    "pre_decoder_type_default": {  # [enc_type][dec_type]
-        "t5": {
-            "t5": None,
-        },
-        "perceiver-tf": {"t5": "linear", "multi-t5": "mc_shared_linear"},
-        "conformer": {
-            "t5": None,
-        },
-    },
     "conv_out_channels": 128,  # number of filters for 'conv' pre_encoder. Otherwise ignored.
     "t5_basename": "google/t5-v1_1-small",
     "pretrained": False,  # bool, if True, load pretrained weights from t5_basename. Mismatched layers are ignored.
@@ -40,15 +32,6 @@ model_cfg = {
     "num_max_positions": "auto",  # int or "auto". Length of positional encoding. Automatically inferred by "feat_length", "event_length" and task_manager.max_task_token_length.
     # 'vocab_size', 'tie_word_embeddings' and 'num_max_positions' are auto-copied to encoder and decoder configs in the below.
     "encoder": {
-        "t5": {
-            "d_model": 512,  # Hidden size of T5 encoder.
-            "num_heads": 6,
-            "num_layers": 8,
-            "dropout_rate": 0.05,
-            "position_encoding_type": "sinusoidal",  # {'sinusoidal', 'trainable'}.
-            "ff_widening_factor": 2,  # wideening factor for MLP/MoE layers. Default is 2 in T5.
-            "ff_layer_type": "t5_gmlp",  # {'t5_gmlp', 'moe', 'mlp', 'gmlp'}. 'moe' for mixture of experts, 'mlp' for standard transformer dense layer, 'gmlp' for simple gated MLP.
-        },
         "perceiver-tf": {
             "num_latents": 24,  # number of latents in Perceiver. 24 in perceiver-tf paper.
             "d_latent": 128,  # latent dimension of Perceiver. 128 in perceiver-tf paper.
@@ -73,30 +56,8 @@ model_cfg = {
             "rotary_apply_to_keys": False,  # Whether to apply rotary to keys. Default is False.
             "rotary_partial_pe": False,  # Whether to use partial positional encoding. Default is False.
         },
-        "conformer": {
-            "d_model": 512,  # Hidden size of T5 encoder.
-            "intermediate_size": 512,  # or 2048. size of the intermediate feed forward layer in each T5Block
-            "num_heads": 8,
-            "num_layers": 8,
-            "dropout_rate": 0.1,
-            "layerdrop": 0.1,  # see https://arxiv.org/abs/1909.11556
-            "position_encoding_type": "rotary",  # {'rotary', 'relative'}.
-            "conv_dim": (512, 512, 512, 512, 512, 512, 512),
-            "conv_stride": (5, 2, 2, 2, 2, 2, 2),
-            "conv_kernel": (10, 3, 3, 3, 3, 3, 3),
-            "conv_depthwise_kernel_size": 31,
-        },
     },
     "decoder": {
-        "t5": {
-            "d_model": 512,  # Hidden size of T5 encoder. If encoder has lower dim, it is projected to this dim for enc-dec cross att.
-            "num_heads": 6,
-            "num_layers": 8,
-            "dropout_rate": 0.05,
-            "position_encoding_type": "sinusoidal",  # {'sinusoidal', 'trainable'}.
-            "ff_widening_factor": 2,  # wideening factor for MLP/MoE layers. Default is 2 in T5.
-            "ff_layer_type": "t5_gmlp",  # {'t5_gmlp', 'moe', 'mlp', 'gmlp'}. 'moe' for mixture of experts, 'mlp' for standard transformer dense layer, 'gmlp' for simple gated MLP.
-        },
         "multi-t5": {
             "d_model": 512,  # Hidden size of T5 encoder. Recommended: {256 or 512}
             "num_heads": 6,
@@ -139,27 +100,5 @@ T5_BASE_CFG = {
         # "tie_word_embeddings": True,
         "use_cache": True,
         # "vocab_size": 1391 # vocab_size is automatically set by the task manager...
-    },
-    "google/t5-efficient-small": {
-        "architectures": ["T5ForConditionalGeneration"],
-        "d_ff": 2048,
-        "d_kv": 64,
-        "d_model": 512,
-        "decoder_start_token_id": 0,
-        "dropout_rate": 0.1,
-        "eos_token_id": 1,
-        "feed_forward_proj": "relu",
-        "initializer_factor": 1.0,
-        "is_encoder_decoder": True,
-        "layer_norm_epsilon": 1e-06,
-        "model_type": "t5",
-        "num_decoder_layers": 6,
-        "num_heads": 8,
-        "num_layers": 6,
-        "pad_token_id": 0,
-        "relative_attention_num_buckets": 32,
-        "torch_dtype": "float32",
-        "transformers_version": "4.17.0.dev0",
-        "use_cache": True,
     },
 }

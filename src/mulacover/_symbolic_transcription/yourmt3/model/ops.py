@@ -9,7 +9,6 @@
 # Please see the details in the LICENSE file.
 """op.py"""
 
-from packaging.version import parse as VersionParse
 
 import torch
 import torch.nn as nn
@@ -54,9 +53,4 @@ def minmax_normalize(x: torch.Tensor, eps: float = 0.008) -> torch.FloatTensor:
 
 
 def optional_compiler_disable(func):
-    if VersionParse(torch.__version__) >= VersionParse("2.1"):
-        # If the version is 2.1 or higher, apply the torch.compiler.disable decorator.
-        return torch.compiler.disable(func)
-    else:
-        # If the version is below 2.1, return the original function.
-        return func
+    return torch.compiler.disable(func)
