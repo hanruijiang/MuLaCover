@@ -24,13 +24,11 @@
 import copy
 from typing import Optional, Tuple, Union, Dict
 from einops import rearrange
-from mulacover._symbolic_transcription.yourmt3.model.ops import count_parameters
 
 import torch
 from torch import nn
 from torch.utils.checkpoint import checkpoint
 from transformers.utils import logging
-from transformers.utils.model_parallel_utils import assert_device_map, get_device_map
 from .t5_compat import (
     T5LayerNorm,
     T5LayerSelfAttention,
@@ -487,173 +485,6 @@ class T5StackYMT3(T5PreTrainedModel):
             attentions=all_attentions,
             cross_attentions=all_cross_attentions,
         )
-
-
-class T5EncoderYMT3(T5PreTrainedModel):
-    # _keys_to_ignore_on_load_missing = [r"encoder.embed_tokens.weight"]
-
-    def __init__(
-        self, encoder_config: Optional[Dict] = None, config: Optional[T5Config] = None
-    ):
-        if config is None:
-            config = T5Config()
-        if encoder_config is not None:
-            config = copy.deepcopy(config)
-            config.update(encoder_config)
-
-        if hasattr(config, "ff_widening_factor"):
-            config.d_ff = int(config.d_model) * int(config.ff_widening_factor)
-
-        config.is_decoder = False
-        config.use_cache = False
-        config.is_encoder_decoder = False
-
-        super().__init__(config)
-        self.model_dim = config.d_model
-
-        self.encoder = T5StackYMT3(config)
-
-        # Initialize weights and apply final processing
-        self.post_init()
-
-    """temporary fix for torch.compile issue"""
-
-    def forward(self, **kwargs):
-        if self.training is True:
-            return self._forward_compile(**kwargs)
-        else:
-            return self._forward_no_compile(**kwargs)
-
-    def _forward_no_compile(self, **kwargs):
-        return self._forward(**kwargs)
-
-    @torch.compile
-    def _forward_compile(self, **kwargs):
-        return self._forward(**kwargs)
-
-    def _forward(
-        self,
-        attention_mask: Optional[torch.FloatTensor] = None,
-        head_mask: Optional[torch.FloatTensor] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
-    ) -> Union[Tuple[torch.FloatTensor], BaseModelOutput]:
-        return_dict = (
-            return_dict if return_dict is not None else self.config.use_return_dict
-        )
-
-        # Encode
-        encoder_outputs = self.encoder(
-            inputs_embeds=inputs_embeds,
-            attention_mask=attention_mask,
-            head_mask=head_mask,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
-        )
-
-        if not return_dict:
-            return encoder_outputs
-        else:
-            return BaseModelOutput(
-                last_hidden_state=encoder_outputs[0],
-                hidden_states=encoder_outputs[1] if len(encoder_outputs) > 1 else None,
-                attentions=encoder_outputs[2] if len(encoder_outputs) > 2 else None,
-            )
-
-
-class T5DecoderYMT3(T5PreTrainedModel):
-
-    def __init__(
-        self, decoder_config: Optional[Dict] = None, config: Optional[T5Config] = None
-    ):
-        if config is None:
-            config = T5Config()
-        if decoder_config is not None:
-            config = copy.deepcopy(config)
-            config.update(decoder_config)
-
-        if hasattr(config, "ff_widening_factor"):
-            config.d_ff = int(config.d_model) * int(config.ff_widening_factor)
-
-        config.is_decoder = True
-        config.is_encoder_decoder = False
-
-        super().__init__(config)
-        self.model_dim = config.d_model
-
-        self.decoder = T5StackYMT3(config)
-
-        # Initialize weights and apply final processing
-        self.post_init()
-
-    """temporary fix for torch.compile issue"""
-
-    def forward(self, **kwargs):
-        if self.training is True:
-            return self._forward_compile(**kwargs)
-        else:
-            return self._forward_no_compile(**kwargs)
-
-    def _forward_no_compile(self, **kwargs):
-        return self._forward(**kwargs)
-
-    @torch.compile
-    def _forward_compile(self, **kwargs):
-        return self._forward(**kwargs)
-
-    def _forward(
-        self,
-        # input_ids: torch.LongTensor, # removed since embed_tokens is outside the decoder
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        attention_mask: Optional[torch.FloatTensor] = None,  # decoder_attention_mask
-        encoder_attention_mask: Optional[torch.FloatTensor] = None,
-        cross_attn_head_mask: Optional[torch.Tensor] = None,
-        head_mask: Optional[torch.FloatTensor] = None,
-        encoder_hidden_states: Optional[torch.FloatTensor] = None,
-        past_key_values: Optional[Tuple[Tuple[torch.Tensor]]] = None,
-        use_cache: Optional[bool] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
-    ) -> Union[Tuple[torch.FloatTensor], BaseModelOutputWithPastAndCrossAttentions]:
-        use_cache = use_cache if use_cache is not None else self.config.use_cache
-        return_dict = (
-            return_dict if return_dict is not None else self.config.use_return_dict
-        )
-
-        if isinstance(encoder_hidden_states, BaseModelOutput):
-            encoder_hidden_states = encoder_hidden_states.last_hidden_state
-
-        # Decode
-        decoder_outputs = self.decoder(
-            inputs_embeds=inputs_embeds,
-            attention_mask=attention_mask,
-            past_key_values=past_key_values,
-            encoder_hidden_states=encoder_hidden_states,
-            encoder_attention_mask=encoder_attention_mask,
-            head_mask=head_mask,
-            cross_attn_head_mask=cross_attn_head_mask,
-            use_cache=use_cache,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
-        )
-
-        if not return_dict:
-            return decoder_outputs
-        else:
-            return BaseModelOutputWithPastAndCrossAttentions(
-                last_hidden_state=decoder_outputs[0],
-                past_key_values=decoder_outputs[1],
-                hidden_states=decoder_outputs[2] if len(decoder_outputs) > 2 else None,
-                attentions=decoder_outputs[3] if len(decoder_outputs) > 3 else None,
-                cross_attentions=(
-                    decoder_outputs[4] if len(decoder_outputs) > 4 else None
-                ),
-            )
 
 
 class MultiChannelT5Decoder(T5PreTrainedModel):

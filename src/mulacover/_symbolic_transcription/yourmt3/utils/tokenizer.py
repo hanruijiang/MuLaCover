@@ -15,7 +15,6 @@ from abc import ABC, abstractmethod
 from mulacover._symbolic_transcription.yourmt3.utils.note_event_dataclasses import (
     Event,
     EventRange,
-    Note,
 )  # , Codec
 from mulacover._symbolic_transcription.yourmt3.utils.event_codec import (
     FastCodec as Codec,
@@ -23,10 +22,8 @@ from mulacover._symbolic_transcription.yourmt3.utils.event_codec import (
 from mulacover._symbolic_transcription.yourmt3.utils.note_event_dataclasses import (
     NoteEvent,
 )
-from mulacover._symbolic_transcription.yourmt3.utils.note2event import note_event2event
 from mulacover._symbolic_transcription.yourmt3.utils.event2note import (
     event2note_event,
-    note_event2note,
 )
 from typing import List, Optional, Union, Tuple, Dict, Counter
 
@@ -98,57 +95,9 @@ class EventTokenizerBase(ABC):
         return [self.codec.decode_event_index(idx) for idx in tokens]
 
     @abstractmethod
-    def encode(self):
-        """Encode your custom events to tokens."""
-        pass
-
-    @abstractmethod
     def decode(self):
         """Decode your custom tokens to events."""
         pass
-
-
-class EventTokenizer(EventTokenizerBase):
-    """
-    Eencoding and decoding events to and from tokens.
-    """
-
-    def __init__(
-        self,
-        base_codec: Union[Codec, str] = "mt3",
-        special_tokens: List[str] = ["PAD", "EOS", "UNK"],
-        extra_tokens: List[str] = [],
-        max_shift_steps: int = 206,
-        program_vocabulary: Optional[Dict] = None,
-        drum_vocabulary: Optional[Dict] = None,
-    ) -> None:
-        """
-        Initializes the EventTokenizerBase object.
-
-        :param codec: The codec to use for encoding and decoding.
-        :param special_tokens: None or list of special tokens to include in the vocabulary.
-        :param extra_tokens: None or list of tokens to be treated as additional special tokens.
-        :param program_vocabulary: None or a dictionary mapping program names to program indices.
-        :param drum_vocabulary: None or a dictionary mapping drum names to drum indices.
-        :param max_shift_steps: The maximum number of shift steps to use for the codec.
-        """
-        # Initialize the codec attribute based on the input codec parameter.
-        super().__init__(
-            base_codec=base_codec,
-            special_tokens=special_tokens,
-            extra_tokens=extra_tokens,
-            max_shift_steps=max_shift_steps,
-            program_vocabulary=program_vocabulary,
-            drum_vocabulary=drum_vocabulary,
-        )
-
-    def encode(self, events):
-        """Encode your custom events to tokens."""
-        return super()._encode(events)
-
-    def decode(self, tokens):
-        """Decode your custom tokens to events."""
-        return super()._decode(tokens)
 
 
 class NoteEventTokenizer(EventTokenizerBase):
@@ -222,67 +171,6 @@ class NoteEventTokenizer(EventTokenizerBase):
     def _decode(self, tokens):
         # This is event detokenizer, not note_event. It is required for displaying events in validation dashboard
         return super()._decode(tokens)
-
-    def encode(
-        self,
-        note_events: List[NoteEvent],
-        tie_note_events: Optional[List[NoteEvent]] = None,
-        start_time: float = 0.0,
-    ) -> List[int]:
-        """Encodes note events and tie note events to tokens."""
-        events = note_event2event(
-            note_events=note_events,
-            tie_note_events=tie_note_events,
-            start_time=start_time,  # required for calcuating relative time
-            tps=self.tps,
-            sort=self.sort,
-        )
-        return super()._encode(events)
-
-    def encode_plus(
-        self,
-        note_events: List[NoteEvent],
-        tie_note_events: Optional[List[NoteEvent]] = None,
-        start_times: float = 0.0,  # Fixing bug: start_time --> start_times
-        add_special_tokens: Optional[bool] = True,
-        max_length: Optional[int] = None,  #  if None, use self.max_length
-        pad_to_max_length: Optional[bool] = True,
-        return_attention_mask: bool = False,
-    ) -> Union[List[int], Tuple[List[int], List[int]]]:
-        """Encodes note events and tie note info to padded tokens."""
-        encoded = self.encode(note_events, tie_note_events, start_times)
-
-        # if task_events:
-        #     encoded = super()._encode(task_events) + encoded
-        if add_special_tokens:
-            if self._prefix:
-                encoded = self._prefix + encoded
-            if self._suffix:
-                encoded = encoded + self._suffix
-
-        if max_length is None:
-            max_length = self.max_length
-
-        length = len(encoded)
-        if length >= max_length:
-            encoded = encoded[:max_length]
-            length = max_length
-
-        if return_attention_mask:
-            attention_mask = [1] * length
-
-        # <PAD>
-        if pad_to_max_length is True:
-            if len(self._zero_pad) != max_length:
-                self._zero_pad = [self.pad_id] * max_length
-            if return_attention_mask:
-                attention_mask += self._zero_pad[length:]
-            encoded = encoded + self._zero_pad[length:]
-
-        if return_attention_mask:
-            return encoded, attention_mask
-
-        return encoded
 
     def encode_task(
         self, task_events: List[Event], max_length: Optional[int] = None

@@ -12,16 +12,15 @@
 import torch
 from torch import nn
 from mulacover._symbolic_transcription.yourmt3.model.t5mod import (
-    T5DecoderYMT3,
     MultiChannelT5Decoder,
 )
-from typing import Optional, Callable, Union, Literal
+from typing import Optional, Callable, Literal
 
 
 @torch.no_grad()
 def task_cond_dec_generate(
-    decoder: Union[T5DecoderYMT3, MultiChannelT5Decoder],
-    decoder_type: Literal["t5", "multi-t5"],
+    decoder: MultiChannelT5Decoder,
+    decoder_type: Literal["multi-t5"],
     embed_tokens: nn.Embedding,
     lm_head: nn.Module,
     encoder_hidden_states: torch.FloatTensor,
@@ -39,8 +38,8 @@ def task_cond_dec_generate(
     conditioning only on the decoder side.
 
     Args:
-        decoder: T5DecoderYMT3 or MultiChannelT5Decoder, any decoder model with T5Stack architecture
-        decoder_type: Literal["t5", "multi-t5"], type of decoder
+        decoder: MultiChannelT5Decoder, any decoder model with T5Stack architecture
+        decoder_type: Literal["multi-t5"], type of decoder
         embed_tokens: nn.Embedding, embedding layer for the decoder
         lm_head: nn.Module, language model head
         encoder_hidden_states: torch.FloatTensor, (B, T, D) or (B, K, T, D) last hidden states
@@ -59,12 +58,9 @@ def task_cond_dec_generate(
     device = encoder_hidden_states.device
 
     # Prepare dec_input_shape: (B, 1) or (B, C, 1)
-    if decoder_type == "t5":
-        dec_input_shape = (bsz, 1)
-    elif decoder_type == "multi-t5":
-        dec_input_shape = (bsz, decoder.num_channels, 1)
-    else:
+    if decoder_type != "multi-t5":
         raise ValueError(f"decoder_type {decoder_type} is not supported.")
+    dec_input_shape = (bsz, decoder.num_channels, 1)
 
     # Prepare dec_input_ids: <bos> + task_prefix_token (B, prefix_len + 1) or (B, C, prefix_len + 1)
     if prefix_ids is not None and prefix_ids.numel() > 0:
@@ -97,10 +93,7 @@ def task_cond_dec_generate(
     unfinished_sequences = torch.ones(dec_input_shape, dtype=torch.long, device=device)
 
     # Fast generation with past_key_values for the rest of the sequence
-    if decoder_type == "t5":
-        dec_input_ids = pred_ids[:, -1].unsqueeze(-1)  # (B, 1)
-    elif decoder_type == "multi-t5":
-        dec_input_ids = pred_ids[:, :, -1].unsqueeze(-1)  # (B, C, 1)
+    dec_input_ids = pred_ids[:, :, -1].unsqueeze(-1)  # (B, C, 1)
     for i in range(max_length - prefix_length - 1):  # -1 for <eos> token
 
         # when past_key_values is provided, we use only the last token as input_ids

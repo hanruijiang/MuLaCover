@@ -8,20 +8,16 @@
 #
 # Please see the details in the LICENSE file.
 import numpy as np
-from typing import Optional, Union, Tuple, Dict, Any, List, Counter
+from typing import Optional, Union, Tuple, Any, List, Counter
 from mulacover._symbolic_transcription.yourmt3.utils.note_event_dataclasses import (
     NoteEvent,
     Event,
-    NoteEventListsBundle,
 )
 from mulacover._symbolic_transcription.yourmt3.config.task import task_cfg
 from mulacover._symbolic_transcription.yourmt3.config.config import model_cfg
 from mulacover._symbolic_transcription.yourmt3.utils.tokenizer import NoteEventTokenizer
 from mulacover._symbolic_transcription.yourmt3.utils.utils import (
     create_program2channel_vocab,
-)
-from mulacover._symbolic_transcription.yourmt3.utils.note2event import (
-    separate_channel_by_program_group_from_note_event_lists_bundle,
 )
 
 SINGING_PROGRAM = 100
@@ -221,181 +217,6 @@ class TaskManager:
             ignore_decoding_tokens_from_and_to=self.ignore_decoding_tokens_from_and_to,
             debug_mode=self.debug_mode,
         )
-
-    # Newly implemented for exclusive transcription task
-    def tokenize_task_and_note_events_batch(
-        self,
-        programs_segments: List[List[int]],
-        has_unannotated_segments: List[bool],
-        note_event_segments: NoteEventListsBundle,
-        subunit_programs_segments: Optional[List[List[np.ndarray]]] = None,  # TODO
-        subunit_note_event_segments: Optional[
-            List[NoteEventListsBundle]
-        ] = None,  # TODO
-        stage: str = "train",  # 'train' or 'eval'
-    ):
-        """Tokenizes a batch of note events into a batch of encoded tokens.
-           Optionally, appends task tokens to the note event tokens.
-
-        Args:
-            programs_segments (List[int]): A list of program numbers.
-            has_unannotated_segments (bool): Whether the batch has unannotated segments.
-            note_event_segments (NoteEventListsBundle): A bundle of note events.
-            subunit_programs_segments (Optional[List[List[np.ndarray]]]): A list of subunit programs.
-            subunit_note_event_segments (Optional[List[NoteEventListsBundle]]): A list of subunit note events.
-
-        Returns:
-            np.ndarray: A batch of encoded tokens, with shape (B, C, L).
-        """
-        if self.task_name == "exclusive":
-            # batch_sz = len(programs_segments)
-            # token_array = np.zeros((batch_sz, self.num_decoding_channels, self.max_note_token_length_per_ch),
-            #                        dtype=np.int32)
-
-            # for programs, has_unannotated, note_events, tie_note_events, start_times in zip(
-            #         programs_segments, has_unannotated_segments, note_event_segments['note_events'],
-            #         note_event_segments['tie_note_events'], note_event_segments['start_times']):
-            #     if has_unannotated:
-            #         annotated_programs = [p for p in programs if p != UNANNOTATED_PROGRAM]
-            #         note_token_array = self.tokenizer.encode_plus(note_events,
-            #                                                       tie_note_events,
-            #                                                       start_times,
-            #                                                       pad_to_max_length=False) # will append EOS token
-            #         task_token_array = self.tokenizer.encode_task(task_events)
-            #     else:
-            #         annotated_programs = programs
-
-            #     task_events = [Event('transcribe_all', 0), Event('task', 0)]
-            #     note_token_array = self.tokenize_note_events_batch(note_events)
-            #     task_token_array = self.tokenize_task_events(annotated_programs, has_unannotated)
-            # return []
-            raise NotImplementedError(
-                "Exclusive transcription task is not implemented yet."
-            )
-        else:
-            # Default task: single or multi-channel decoding, without appending task tokens
-            return self.tokenize_note_events_batch(note_event_segments)  # (B, C, L)
-            # Exclusive transcription task
-            # if has_unannotated_segments:
-            #     annotated_programs = [p for p in programs_segments if p != UNANNOTATED_PROGRAM]
-            # else:
-            #     annotated_programs = programs_segments
-
-            # # Main task: transcribe all
-            # main_task_events = self.task.get("eval_subtask_prefix")
-
-    def tokenize_note_events_batch(
-        self,
-        note_event_segments: NoteEventListsBundle,
-        start_time_to_zero: bool = False,
-        sort: bool = True,
-    ) -> np.ndarray:
-        """Tokenizes a batch of note events into a batch of encoded tokens.
-
-        Args:
-            note_event_segments (NoteEventListsBundle): A bundle of note events.
-
-        Returns:
-            np.ndarray: A batch of encoded tokens, with shape (B, C, L).
-        """
-        batch_sz = len(note_event_segments["note_events"])
-        note_token_array = np.zeros(
-            (batch_sz, self.num_decoding_channels, self.max_note_token_length_per_ch),
-            dtype=np.int32,
-        )
-
-        if self.num_decoding_channels == 1:
-            # Single-channel decoding task
-            zipped_events = list(zip(*note_event_segments.values()))
-            for b in range(batch_sz):
-                note_token_array[b, 0, :] = self.tokenizer.encode_plus(
-                    *zipped_events[b],
-                    max_length=self.max_note_token_length,
-                    pad_to_max_length=True,
-                )
-        elif self.num_decoding_channels > 1:
-            # Multi-channel decoding task
-            ch_sep_ne_bundle = (
-                separate_channel_by_program_group_from_note_event_lists_bundle(
-                    source_note_event_lists_bundle=note_event_segments,
-                    num_program_groups=self.num_decoding_channels,
-                    program2channel_vocab=self.program2channel_vocab,
-                    start_time_to_zero=start_time_to_zero,
-                    sort=sort,
-                )
-            )  # (batch_sz,)
-
-            for b in range(batch_sz):
-                zipped_channel = list(zip(*ch_sep_ne_bundle[b].values()))
-                for c in range(self.num_decoding_channels):
-                    note_token_array[b, c, :] = self.tokenizer.encode_plus(
-                        *zipped_channel[c],
-                        max_length=self.max_note_token_length_per_ch,
-                        pad_to_max_length=True,
-                    )
-        return note_token_array  # (B, C, L)
-
-    def tokenize_note_events(
-        self,
-        note_events: List[NoteEvent],
-        tie_note_events: Optional[List[NoteEvent]] = None,
-        start_time: float = 0.0,
-        **kwargs: Any,
-    ) -> List[int]:
-        """(Deprecated) Tokenizes a sequence of note events into a sequence of encoded tokens."""
-        return self.tokenizer.encode_plus(
-            note_events, tie_note_events, start_time, **kwargs
-        )
-
-    # # This will be deprecated, currently used by datasets_eval.py
-
-    #     def tokenize_task_events_batch(self, programs_segments: List[int],
-    #                                    has_unannotated_segments: List[bool]) -> List[int]:
-    #         """Tokenizes batch of task tokens from annotation info.
-
-    #         Args:
-    #             programs_segments (List[int]): A list of program numbers.
-    #             has_unannotated_segments (bool): Whether the batch has unannotated segments.
-
-    #         Returns:
-    #             np.ndarray: Shape (B, C, L).
-
-    #         """
-    #         batch_sz = len(programs_segments)
-    #         task_token_array = np.zeros((batch_sz, self.num_decoding_channels, self.max_task_token_length), dtype=np.int32)
-
-    #         if self.max_task_token_length == 0:
-    #             return task_token_array
-
-    #         if self.num_decoding_channels == 1:
-    #             for b in range(batch_sz):
-    #                 task_token_array[b, 0, :] = self.tokenize_task_events(programs_segments[b], has_unannotated_segments[b])
-    #         elif self.num_decoding_channels > 1:
-    #             for b in range(batch_sz):
-    #                 task_token_array[b, :, :] = self.tokenize_task_events(programs_segments[b], has_unannotated_segments[b])
-    #         return task_token_array  # (B, C, L)
-
-    def tokenize_task_events(
-        self, programs: List[int], has_unannotated: bool
-    ) -> List[int]:
-        """Tokenizes a sequence of programs into a sequence of encoded tokens. Used for training."""
-        if self.task_name == "singing_drum_v1":
-            if has_unannotated:
-                if SINGING_PROGRAM in programs:
-                    task_events = [Event("transcribe_singing", 0), Event("task", 0)]
-                elif DRUM_PROGRAM in programs:
-                    task_events = [Event("transcribe_drum", 0), Event("task", 0)]
-            else:
-                task_events = [Event("transcribe_all", 0), Event("task", 0)]
-        else:
-            return []
-
-        if self.padding_task_token:
-            return self.tokenizer.encode_task(
-                task_events, max_length=self.max_task_token_length
-            )
-        else:
-            return self.tokenizer.encode_task(task_events)
 
     def detokenize(
         self, tokens: List[int], start_time: float = 0.0, return_events: bool = False

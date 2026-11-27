@@ -18,9 +18,8 @@ NoteEvent to Note:
 
 """
 
-import warnings
 from collections import Counter
-from typing import List, Tuple, Optional, Dict, Counter
+from typing import List, Tuple, Optional
 
 from mulacover._symbolic_transcription.yourmt3.utils.note_event_dataclasses import (
     Note,
