@@ -8,7 +8,7 @@
 #
 # Please see the details in the LICENSE file.
 import numpy as np
-from typing import Optional, Union, Tuple, Any, List, Counter
+from typing import Union, Tuple, List, Counter
 from mulacover._symbolic_transcription.yourmt3.utils.note_event_dataclasses import (
     NoteEvent,
     Event,

@@ -43,19 +43,12 @@ class MuLaCoverGenConfig:
 def _resolve_paths(pretrained_path):
     root = Path(pretrained_path)
     model_root = root / "MuLaCover"
-    if not model_root.is_dir():
-        # Compatibility with private pre-release bundles created before the
-        # public checkpoint directory was aligned with the product name.
-        model_root = root / "MuLaCover-oss"
-    tokenizer = root / "tokenizer.json"
-    if not tokenizer.is_file():
-        tokenizer = model_root / "tokenizer.json"
     paths = {
         "mulacover": model_root,
         "codec": root / "HeartCodec-oss",
         "qwen": root / "Qwen3-Embedding-0.6B",
         "transcriptor": root / "SymbolicTranscriptor",
-        "tokenizer": tokenizer,
+        "tokenizer": model_root / "tokenizer.json",
         "gen_config": model_root / "gen_config.json",
     }
     for name in ("mulacover", "codec", "qwen", "tokenizer", "gen_config"):
@@ -79,8 +72,6 @@ def _resolve_components(value, kind):
         values = {name: value[name] for name in names}
     else:
         values = dict.fromkeys(names, value)
-    if kind == "device":
-        return {name: torch.device(item) for name, item in values.items()}
     for name, item in values.items():
         if item not in (torch.float32, torch.float16, torch.bfloat16):
             raise ValueError(f"Unsupported {kind} for {name}: {item}")
@@ -484,14 +475,14 @@ class MuLaCoverGenPipeline:
     def from_pretrained(
         cls,
         pretrained_path: str,
-        device: Union[torch.device, Dict[str, torch.device]],
+        device: torch.device,
         dtype: Union[torch.dtype, Dict[str, torch.dtype]],
         lazy_load: bool = False,
     ):
         paths = _resolve_paths(pretrained_path)
         return cls(
             paths=paths,
-            devices=_resolve_components(device, "device"),
+            devices=dict.fromkeys(("mulacover", "codec", "qwen", "transcriptor"), torch.device(device)),
             dtypes=_resolve_components(dtype, "dtype"),
             text_tokenizer=Tokenizer.from_file(str(paths["tokenizer"])),
             config=MuLaCoverGenConfig.from_file(paths["gen_config"]),

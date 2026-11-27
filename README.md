@@ -17,15 +17,30 @@ git clone https://github.com/hanruijiang/MuLaCover.git
 cd MuLaCover
 conda create -y -n mulacover python=3.10 pip
 conda activate mulacover
+```
+
+For reference-audio inference:
+
+```bash
 python -m pip install torch==2.10.0 torchvision==0.25.0 torchaudio==2.10.0 \
   --index-url https://download.pytorch.org/whl/cu130
 python -m pip install -e '.[audio]'
 mulacover --help
 ```
 
-For MIDI-only inference, install the matching PyTorch/torchvision wheels and
-use `python -m pip install -e .` instead. The `audio` extra is needed for
-reference-audio transcription. On a machine with conflicting CUDA libraries
+For MIDI-only inference (no `torchaudio` or `audio` extra required):
+
+```bash
+python -m pip install torch==2.10.0 torchvision==0.25.0 \
+  --index-url https://download.pytorch.org/whl/cu130
+python -m pip install -e .
+mulacover --help
+```
+
+PyTorch 2.6 or newer is required by the restricted YourMT3 checkpoint loader.
+Use matching PyTorch and torchaudio versions for reference audio. The commands
+retain torchvision from the previously verified environment; its omission has
+not been validated. On a machine with conflicting CUDA libraries
 (e.g. a Deep Learning AMI), prefix the inference command with
 `env -u LD_LIBRARY_PATH` if cuBLAS reports an invalid handle or a missing symbol.
 

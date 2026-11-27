@@ -226,10 +226,6 @@ class SymbolicCondition:
             for notes in (self.melody, self.drums, self.chords)
         )
 
-    @property
-    def length(self):
-        return self.symbolic_length
-
     @classmethod
     def from_midi(cls, melody_path, chord_path, drum_path=None):
         """Merge non-drum melody/chord tracks; an explicit drum file uses all notes."""

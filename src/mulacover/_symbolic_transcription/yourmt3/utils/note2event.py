@@ -58,16 +58,10 @@ Event tools:
 """
 
 import warnings
-from copy import deepcopy
 from itertools import chain
-from typing import Optional, Tuple, List, Set, Dict, Any
+from typing import Optional, Tuple, List
 
-from mulacover._symbolic_transcription.yourmt3.utils.note_event_dataclasses import (
-    Note,
-    NoteEvent,
-    NoteEventListsBundle,
-)
-from mulacover._symbolic_transcription.yourmt3.utils.note_event_dataclasses import Event
+from mulacover._symbolic_transcription.yourmt3.utils.note_event_dataclasses import Note
 
 DRUM_OFFSET_TIME = 0.01  # in seconds
 MINIMUM_OFFSET_TIME = 0.01  # this is used to avoid zero-length notes
@@ -207,57 +201,3 @@ def sort_notes(notes: List[Note]) -> List[Note]:
             )
         )
     return notes
-
-
-def notes2pc_notes(notes: List[Note], note_offset: int = 64) -> List[Note]:
-    """Convert a list of Note instances to a list of Pitch Class Set (PCS) instances.
-    This method is implemented for octave-ignore evaluation cases."""
-    pc_notes = deepcopy(notes)
-    for note in pc_notes:
-        note.pitch = note.pitch % 12 + note_offset
-    return pc_notes
-
-
-def extract_program_from_notes(notes: List[Note]) -> Set[int]:
-    """Extract program numbers from a list of Note instances."""
-    prg = set()
-    for note in notes:
-        if note.program not in prg:
-            prg.add(note.program)
-    return prg
-
-
-def extract_notes_selected_by_programs(
-    notes: List[Note], programs: Set[int], sort: bool = True
-) -> List[Note]:
-    """Extract notes selected by program numbers from a list of Note instances."""
-    selected_notes = []
-    for note in notes:
-        if note.program in programs:
-            selected_notes.append(note)
-    if sort:
-        selected_notes.sort(
-            key=lambda note: (
-                note.onset,
-                note.is_drum,
-                note.program,
-                note.velocity,
-                note.pitch,
-            )
-        )
-    return selected_notes
-
-
-""" 
-NoteEvent data class:
-
-Combines NoteEvent and NoteActivity for onset and offset events during Note to Event conversion.
-
-Features:
-
-Trackable: follow note activity by index
-Sliceable: extract time ranges; time is absolute
-Mergeable: combine two NoteEvent instances (re-index needed)
-Mutable: mute events by program number, pitch
-Transferable: easily convert to Note or Event tokens
-"""
