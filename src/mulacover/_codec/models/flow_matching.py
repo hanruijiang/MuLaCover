@@ -118,6 +118,7 @@ class FlowMatching(nn.Module):
             t_span,
             additional_model_input,
             guidance_scale,
+            disable_progress=disable_progress,
         )
 
         latents[:, 0:incontext_length, :] = incontext_latents[
@@ -125,7 +126,10 @@ class FlowMatching(nn.Module):
         ]  # B, T, dim
         return latents
 
-    def solve_euler(self, x, incontext_x, incontext_length, t_span, mu, guidance_scale):
+    def solve_euler(
+        self, x, incontext_x, incontext_length, t_span, mu, guidance_scale,
+        disable_progress=False,
+    ):
         """
         Fixed euler solver for ODEs.
         Args:
@@ -140,7 +144,7 @@ class FlowMatching(nn.Module):
         # I am storing this because I can later plot it by putting a debugger here and saving it to a file
         # Or in future might add like a return_all_steps flag
         sol = []
-        for step in tqdm(range(1, len(t_span))):
+        for step in tqdm(range(1, len(t_span)), disable=disable_progress):
             x[:, 0:incontext_length, :] = (1 - (1 - 1e-6) * t) * noise[
                 :, 0:incontext_length, :
             ] + t * incontext_x[:, 0:incontext_length, :]

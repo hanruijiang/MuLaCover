@@ -11,25 +11,6 @@ def get_padding(kernel_size, dilation=1):
     return int((kernel_size * dilation - dilation) / 2)
 
 
-# Scripting this brings model speed up 1.4x
-@torch.jit.script
-def snake(x, alpha):
-    shape = x.shape
-    x = x.reshape(shape[0], shape[1], -1)
-    x = x + (alpha + 1e-9).reciprocal() * torch.sin(alpha * x).pow(2)
-    x = x.reshape(shape)
-    return x
-
-
-class Snake1d(nn.Module):
-    def __init__(self, channels):
-        super().__init__()
-        self.alpha = nn.Parameter(torch.ones(1, channels, 1))
-
-    def forward(self, x):
-        return snake(x, self.alpha)
-
-
 class Conv1d(nn.Conv1d):
     def __init__(
         self,
@@ -490,45 +471,6 @@ class ScalarModel(nn.Module):
         )
         self.encoder = nn.ModuleList(self.encoder)
         self.decoder = nn.ModuleList(self.decoder)
-
-    def forward(self, x):
-        for i, layer in enumerate(self.encoder):
-            if i != len(self.encoder) - 1:
-                x = layer(x)
-            else:
-                x = F.tanh(layer(x))
-        # import pdb; pdb.set_trace()
-        x = self.vq.apply(x)  # vq
-        for i, layer in enumerate(self.decoder):
-            x = layer(x)
-        return x
-
-    def inference(self, x):
-        for i, layer in enumerate(self.encoder):
-            if i != len(self.encoder) - 1:
-                x = layer(x)
-            else:
-                x = F.tanh(layer(x))  # reverse to tanh
-
-        emb = x
-        # import pdb; pdb.set_trace()
-        emb_quant = self.vq.apply(emb)  # vq
-        x = emb_quant
-        for i, layer in enumerate(self.decoder):
-            x = layer(x)
-        return emb, emb_quant, x
-
-    def encode(self, x):
-        for i, layer in enumerate(self.encoder):
-            if i != len(self.encoder) - 1:
-                x = layer(x)
-            else:
-                x = F.tanh(layer(x))  # reverse to tanh
-
-        emb = x
-        # import pdb; pdb.set_trace()
-        emb_quant = self.vq.apply(emb)  # vq
-        return emb
 
     def decode(self, x):
         x = self.vq.apply(

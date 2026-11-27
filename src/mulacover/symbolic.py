@@ -49,7 +49,7 @@ def _load_mido():
         import mido
     except ImportError as error:
         raise ImportError(
-            "MIDI conditioning requires mido. Install mulacover[midi]."
+            "MIDI conditioning requires mido. Install it with `pip install mido`."
         ) from error
     return mido
 
