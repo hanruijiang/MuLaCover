@@ -6,7 +6,7 @@ import gc
 import json
 import math
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Union
 
 import torch
 from tokenizers import Tokenizer
@@ -43,19 +43,12 @@ class MuLaCoverGenConfig:
 def _resolve_paths(pretrained_path):
     root = Path(pretrained_path)
     model_root = root / "MuLaCover"
-    if not model_root.is_dir():
-        # Compatibility with private pre-release bundles created before the
-        # public checkpoint directory was aligned with the product name.
-        model_root = root / "MuLaCover-oss"
-    tokenizer = root / "tokenizer.json"
-    if not tokenizer.is_file():
-        tokenizer = model_root / "tokenizer.json"
     paths = {
         "mulacover": model_root,
         "codec": root / "HeartCodec-oss",
         "qwen": root / "Qwen3-Embedding-0.6B",
         "transcriptor": root / "SymbolicTranscriptor",
-        "tokenizer": tokenizer,
+        "tokenizer": model_root / "tokenizer.json",
         "gen_config": model_root / "gen_config.json",
     }
     for name in ("mulacover", "codec", "qwen", "tokenizer", "gen_config"):
@@ -79,8 +72,6 @@ def _resolve_components(value, kind):
         values = {name: value[name] for name in names}
     else:
         values = dict.fromkeys(names, value)
-    if kind == "device":
-        return {name: torch.device(item) for name, item in values.items()}
     for name, item in values.items():
         if item not in (torch.float32, torch.float16, torch.bfloat16):
             raise ValueError(f"Unsupported {kind} for {name}: {item}")
@@ -99,6 +90,23 @@ def _read_text(value, name):
     except OSError:
         pass
     return value
+
+
+def _check_weights(name, info, ignore_unexpected=()):
+    problems = {
+        key: info.get(key, [])
+        for key in ("missing_keys", "mismatched_keys", "error_msgs")
+        if info.get(key)
+    }
+    unexpected = [
+        key for key in info.get("unexpected_keys", [])
+        if not key.startswith(ignore_unexpected)
+    ]
+    if unexpected:
+        problems["unexpected_keys"] = unexpected
+    if problems:
+        raise ValueError(f"{name} checkpoint: {problems}")
+
 
 
 class MuLaCoverGenPipeline:
@@ -149,29 +157,22 @@ class MuLaCoverGenPipeline:
                 local_files_only=True,
                 output_loading_info=True,
             )
-            missing_style = [
-                name for name in loading_info["missing_keys"]
-                if name.startswith("tag_mlp_layers.")
-            ]
-            if model.config.train_tag and missing_style:
-                raise ValueError(
-                    "This MuLaCover checkpoint is missing StyleMLP weights. "
-                    "Download a complete MuLaCover model release containing "
-                    "the StyleMLP weights; incomplete checkpoints cannot "
-                    "reproduce the intended style conditioning."
-                )
+            _check_weights("MuLaCover", loading_info)
             self._mulacover = model.eval()
         return self._mulacover
 
     @property
     def codec(self):
         if self._codec is None:
-            self._codec = HeartCodec.from_pretrained(
+            model, loading_info = HeartCodec.from_pretrained(
                 self.paths["codec"],
                 device_map=self.devices["codec"],
                 dtype=self.dtypes["codec"],
                 local_files_only=True,
-            ).eval()
+                output_loading_info=True,
+            )
+            _check_weights("HeartCodec", loading_info, ("scalar_model.encoder.",))
+            self._codec = model.eval()
         return self._codec
 
     def _load_qwen(self):
@@ -181,15 +182,14 @@ class MuLaCoverGenPipeline:
             self._qwen_tokenizer = AutoTokenizer.from_pretrained(
                 self.paths["qwen"], padding_side="left", local_files_only=True
             )
-            self._qwen = (
-                AutoModel.from_pretrained(
-                    self.paths["qwen"],
-                    dtype=self.dtypes["qwen"],
-                    local_files_only=True,
-                )
-                .to(self.devices["qwen"])
-                .eval()
+            model, loading_info = AutoModel.from_pretrained(
+                self.paths["qwen"],
+                dtype=self.dtypes["qwen"],
+                local_files_only=True,
+                output_loading_info=True,
             )
+            _check_weights("Qwen3", loading_info)
+            self._qwen = model.to(self.devices["qwen"]).eval()
 
     def _release(self, name):
         if not self.lazy_load:
@@ -484,14 +484,14 @@ class MuLaCoverGenPipeline:
     def from_pretrained(
         cls,
         pretrained_path: str,
-        device: Union[torch.device, Dict[str, torch.device]],
+        device: torch.device,
         dtype: Union[torch.dtype, Dict[str, torch.dtype]],
         lazy_load: bool = False,
     ):
         paths = _resolve_paths(pretrained_path)
         return cls(
             paths=paths,
-            devices=_resolve_components(device, "device"),
+            devices=dict.fromkeys(("mulacover", "codec", "qwen", "transcriptor"), torch.device(device)),
             dtypes=_resolve_components(dtype, "dtype"),
             text_tokenizer=Tokenizer.from_file(str(paths["tokenizer"])),
             config=MuLaCoverGenConfig.from_file(paths["gen_config"]),

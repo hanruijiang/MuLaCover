@@ -15,9 +15,6 @@ from transformers.utils import ModelOutput
 from transformers.configuration_utils import PretrainedConfig
 from transformers.modeling_utils import PreTrainedModel
 
-# from transformers.models.perceiver.modeling_perceiver import (PerceiverAbstractPositionEncoding,
-#                                                               PerceiverTrainablePositionEncoding,
-#                                                               PerceiverFourierPositionEncoding)
 
 
 class PerceiverTFConfig(PretrainedConfig):
@@ -220,24 +217,11 @@ class PerceiverTFPreTrainedModel(PreTrainedModel):
     def _init_weights(self, module):
         """Initialize the weights"""
         if isinstance(module, (nn.Linear, nn.Conv2d)):
-            # Slightly different from the TF version which uses truncated_normal for initialization
-            # cf https://github.com/pytorch/pytorch/pull/5617
             module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
             if module.bias is not None:
                 module.bias.data.zero_()
         elif hasattr(module, "latents"):
             module.latents.data.normal_(mean=0.0, std=self.config.initializer_range)
-        elif hasattr(module, "_pos_emb") and isinstance(module._pos_emb, nn.Parameter):
-            # initialize PerceiverTFTrainablePE
-            module._pos_emb.data.normal_(mean=0.0, std=self.config.initializer_range)
-        elif hasattr(module, "_pos_emb_temporal"):
-            # initialize PerceiverTFTrainablePE
-            module._pos_emb_temporal.data.normal_(
-                mean=0.0, std=self.config.initializer_range
-            )
-        elif hasattr(module, "slopes") and isinstance(module.slopes, nn.Parameter):
-            # initialize AlibiPositionalBias
-            module.reset_parameters()
         elif isinstance(module, nn.ParameterDict):
             for modality in module.keys():
                 module[modality].data.normal_(
@@ -250,9 +234,6 @@ class PerceiverTFPreTrainedModel(PreTrainedModel):
         elif isinstance(module, nn.LayerNorm):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
-        # elif hasattr(module, "position_embeddings") and isinstance(
-        #         module, PerceiverTrainablePositionEncoding):
-        #     module.position_embeddings.data.normal_(mean=0.0, std=self.config.initializer_range)
 
 
 # Replace the 'ModelOutputWithCrossAttentions' with 'MoEModelOutputWithCrossAttentions' for MoE

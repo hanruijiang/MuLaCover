@@ -49,7 +49,7 @@ def _load_mido():
         import mido
     except ImportError as error:
         raise ImportError(
-            "MIDI conditioning requires mido. Install mulacover[midi]."
+            "MIDI conditioning requires mido. Install it with `pip install mido`."
         ) from error
     return mido
 
@@ -225,10 +225,6 @@ class SymbolicCondition:
             (int((notes[:, 0] + notes[:, 2]).max()) if len(notes) else 0)
             for notes in (self.melody, self.drums, self.chords)
         )
-
-    @property
-    def length(self):
-        return self.symbolic_length
 
     @classmethod
     def from_midi(cls, melody_path, chord_path, drum_path=None):

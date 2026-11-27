@@ -12,20 +12,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Transformers 4.45.1 attention with its original tuple-cache semantics.
-
-Kept private to preserve pretrained YourMT3 behavior alongside newer Transformers.
-"""
+"""T5 attention, gated feedforward layers and tuple KV cache."""
 
 import math
 import torch
 from torch import nn
 from transformers.activations import ACT2FN
 from transformers import T5Config
-from transformers.pytorch_utils import (
-    find_pruneable_heads_and_indices,
-    prune_linear_layer,
-)
 
 
 class T5LayerNorm(nn.Module):
@@ -51,28 +44,6 @@ class T5LayerNorm(nn.Module):
             hidden_states = hidden_states.to(self.weight.dtype)
 
         return self.weight * hidden_states
-
-
-class T5DenseActDense(nn.Module):
-    def __init__(self, config: T5Config):
-        super().__init__()
-        self.wi = nn.Linear(config.d_model, config.d_ff, bias=False)
-        self.wo = nn.Linear(config.d_ff, config.d_model, bias=False)
-        self.dropout = nn.Dropout(config.dropout_rate)
-        self.act = ACT2FN[config.dense_act_fn]
-
-    def forward(self, hidden_states):
-        hidden_states = self.wi(hidden_states)
-        hidden_states = self.act(hidden_states)
-        hidden_states = self.dropout(hidden_states)
-        if (
-            isinstance(self.wo.weight, torch.Tensor)
-            and hidden_states.dtype != self.wo.weight.dtype
-            and self.wo.weight.dtype != torch.int8
-        ):
-            hidden_states = hidden_states.to(self.wo.weight.dtype)
-        hidden_states = self.wo(hidden_states)
-        return hidden_states
 
 
 class T5DenseGatedActDense(nn.Module):
@@ -107,10 +78,7 @@ class T5DenseGatedActDense(nn.Module):
 class T5LayerFF(nn.Module):
     def __init__(self, config: T5Config):
         super().__init__()
-        if config.is_gated_act:
-            self.DenseReluDense = T5DenseGatedActDense(config)
-        else:
-            self.DenseReluDense = T5DenseActDense(config)
+        self.DenseReluDense = T5DenseGatedActDense(config)
 
         self.layer_norm = T5LayerNorm(config.d_model, eps=config.layer_norm_epsilon)
         self.dropout = nn.Dropout(config.dropout_rate)
@@ -145,24 +113,6 @@ class T5Attention(nn.Module):
             self.relative_attention_bias = nn.Embedding(
                 self.relative_attention_num_buckets, self.n_heads
             )
-        self.pruned_heads = set()
-        self.gradient_checkpointing = False
-
-    def prune_heads(self, heads):
-        if len(heads) == 0:
-            return
-        heads, index = find_pruneable_heads_and_indices(
-            heads, self.n_heads, self.key_value_proj_dim, self.pruned_heads
-        )
-        # Prune linear layers
-        self.q = prune_linear_layer(self.q, index)
-        self.k = prune_linear_layer(self.k, index)
-        self.v = prune_linear_layer(self.v, index)
-        self.o = prune_linear_layer(self.o, index, dim=1)
-        # Update hyper params
-        self.n_heads = self.n_heads - len(heads)
-        self.inner_dim = self.key_value_proj_dim * self.n_heads
-        self.pruned_heads = self.pruned_heads.union(heads)
 
     @staticmethod
     def _relative_position_bucket(
@@ -351,8 +301,6 @@ class T5Attention(nn.Module):
                     device=scores.device,
                     dtype=scores.dtype,
                 )
-                if self.gradient_checkpointing and self.training:
-                    position_bias.requires_grad = True
             else:
                 position_bias = self.compute_bias(
                     real_seq_length, key_length, device=scores.device
@@ -368,14 +316,7 @@ class T5Attention(nn.Module):
                     position_bias + mask
                 )  # (batch_size, n_heads, seq_length, key_length)
 
-        if self.pruned_heads:
-            mask = torch.ones(position_bias.shape[1])
-            mask[list(self.pruned_heads)] = 0
-            position_bias_masked = position_bias[:, mask.bool()]
-        else:
-            position_bias_masked = position_bias
-
-        scores += position_bias_masked
+        scores += position_bias
         attn_weights = nn.functional.softmax(scores.float(), dim=-1).type_as(
             scores
         )  # (batch_size, n_heads, seq_length, key_length)

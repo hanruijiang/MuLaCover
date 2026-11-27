@@ -24,13 +24,10 @@
 import copy
 from typing import Optional, Tuple, Union, Dict
 from einops import rearrange
-from mulacover._symbolic_transcription.yourmt3.model.ops import count_parameters
 
 import torch
 from torch import nn
-from torch.utils.checkpoint import checkpoint
 from transformers.utils import logging
-from transformers.utils.model_parallel_utils import assert_device_map, get_device_map
 from .t5_compat import (
     T5LayerNorm,
     T5LayerSelfAttention,
@@ -45,13 +42,12 @@ from transformers import T5Config, T5PreTrainedModel
 from mulacover._symbolic_transcription.yourmt3.model.positional_encoding import (
     FixedSinusoidalPositionalEmbedding,
 )
-from mulacover._symbolic_transcription.yourmt3.model.ff_layer import get_ff_layer
 
 logger = logging.get_logger(__name__)
 
 
 class T5BlockYMT3(nn.Module):
-    """T5 Block, modified to allow using different types of FF layers."""
+    """T5 decoder block."""
 
     def __init__(self, config, has_relative_attention_bias=False):
         super().__init__()
@@ -65,22 +61,7 @@ class T5BlockYMT3(nn.Module):
         if self.is_decoder:
             self.layer.append(T5LayerCrossAttention(config))
 
-        # FF layer
-        if config.ff_layer_type == "t5_gmlp":
-            self.layer.append(T5LayerFF(config))
-        elif config.ff_layer_type == "moe":
-            config.moe_num_experts = 8
-            config.moe_topk = 2
-            config.hidden_act = "silu"
-            moe = get_ff_layer(
-                config,
-                input_size=config.d_model,
-                widening_factor=config.ff_widening_factor,
-            )
-            self.layer.append(moe)
-        else:
-            raise ValueError(f"Unknown FF layer type: {config.ff_layer_type}.")
-        self.ff_layer_type = config.ff_layer_type
+        self.layer.append(T5LayerFF(config))
 
     def forward(
         self,
@@ -130,7 +111,7 @@ class T5BlockYMT3(nn.Module):
             2:
         ]  # Keep self-attention outputs and relative position weights
 
-        # clamp inf values to enable fp16 training
+        # clamp infinities in float16
         if hidden_states.dtype == torch.float16:
             clamp_value = torch.where(
                 torch.isinf(hidden_states).any(),
@@ -163,7 +144,7 @@ class T5BlockYMT3(nn.Module):
             )
             hidden_states = cross_attention_outputs[0]
 
-            # clamp inf values to enable fp16 training
+            # clamp infinities in float16
             if hidden_states.dtype == torch.float16:
                 clamp_value = torch.where(
                     torch.isinf(hidden_states).any(),
@@ -183,17 +164,9 @@ class T5BlockYMT3(nn.Module):
             # Keep cross-attention outputs and relative position weights
             attention_outputs = attention_outputs + cross_attention_outputs[2:]
 
-        # Apply Feed Forward layer - Modified for MoE
-        if self.ff_layer_type == "t5_gmlp":
-            hidden_states = self.layer[-1](hidden_states)
-        elif self.ff_layer_type == "moe":
-            hidden_states = (
-                hidden_states + self.layer[-1](hidden_states)[0]
-            )  # residual connection outside the MoE
-        else:
-            raise ValueError(f"Unknown FF layer type: {self.ff_layer_type}.")
+        hidden_states = self.layer[-1](hidden_states)
 
-        # clamp inf values to enable fp16 training
+        # clamp infinities in float16
         if hidden_states.dtype == torch.float16:
             clamp_value = torch.where(
                 torch.isinf(hidden_states).any(),
@@ -227,30 +200,13 @@ class T5StackYMT3(T5PreTrainedModel):
         super().__init__(config)
         self.is_decoder = config.is_decoder
 
-        # Positional encoding (modified)
-        self.use_t5_trainable_pe = False
-        self.additive_pe = None
-
-        pos_enc_type = getattr(config, "position_encoding_type", "sinusoidal")
-        if pos_enc_type in ["sinusoidal"]:
-            self.additive_pe = FixedSinusoidalPositionalEmbedding(
-                config.num_max_positions, embedding_dim=config.d_model
-            )
-            self.block = nn.ModuleList(
-                [
-                    T5BlockYMT3(config, has_relative_attention_bias=False)
-                    for i in range(config.num_layers)
-                ]
-            )
-        elif pos_enc_type == "trainable":
-            self.use_t5_trainable_pe = True
-            # Stack blocks
-            self.block = nn.ModuleList(
-                [
-                    T5BlockYMT3(config, has_relative_attention_bias=bool(i == 0))
-                    for i in range(config.num_layers)
-                ]
-            )
+        self.additive_pe = FixedSinusoidalPositionalEmbedding(
+            config.num_max_positions, embedding_dim=config.d_model
+        )
+        self.block = nn.ModuleList(
+            [T5BlockYMT3(config, has_relative_attention_bias=False)
+             for _ in range(config.num_layers)]
+        )
 
         self.final_layer_norm = T5LayerNorm(
             config.d_model, eps=config.layer_norm_epsilon
@@ -259,8 +215,6 @@ class T5StackYMT3(T5PreTrainedModel):
 
         # Initialize weights and apply final processing
         self.post_init()
-        # Model parallel
-        self.gradient_checkpointing = False
 
     def forward(
         self,
@@ -361,13 +315,6 @@ class T5StackYMT3(T5PreTrainedModel):
         else:
             encoder_extended_attention_mask = None
 
-        if self.gradient_checkpointing and self.training:
-            if use_cache:
-                logger.warning_once(
-                    "`use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`..."
-                )
-                use_cache = False
-
         # Prepare head mask if needed
         head_mask = self.get_head_mask(head_mask, self.config.num_layers)
         cross_attn_head_mask = self.get_head_mask(
@@ -380,13 +327,9 @@ class T5StackYMT3(T5PreTrainedModel):
         position_bias = None
         encoder_decoder_position_bias = None
 
-        # mod: additive absolute PE (sinusoidal)
-        if self.additive_pe is not None:
-            inputs_embeds = inputs_embeds + self.additive_pe(
-                inputs_embeds.shape[1], past_key_values_length
-            )
-        else:
-            pass  # trinable PE is implemented in T5Block
+        inputs_embeds = inputs_embeds + self.additive_pe(
+            inputs_embeds.shape[1], past_key_values_length
+        )
 
         hidden_states = self.dropout(inputs_embeds)
 
@@ -399,41 +342,19 @@ class T5StackYMT3(T5PreTrainedModel):
             if output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states,)
 
-            if self.gradient_checkpointing and self.training:
-
-                def create_custom_forward(module):
-
-                    def custom_forward(*inputs):
-                        return tuple(module(*inputs, use_cache, output_attentions))
-
-                    return custom_forward
-
-                layer_outputs = checkpoint(
-                    create_custom_forward(layer_module),
-                    hidden_states,
-                    extended_attention_mask,
-                    position_bias,
-                    encoder_hidden_states,
-                    encoder_extended_attention_mask,
-                    encoder_decoder_position_bias,
-                    layer_head_mask,
-                    cross_attn_layer_head_mask,
-                    None,  # past_key_value is always None with gradient checkpointing
-                )
-            else:
-                layer_outputs = layer_module(
-                    hidden_states,
-                    attention_mask=extended_attention_mask,
-                    position_bias=position_bias,
-                    encoder_hidden_states=encoder_hidden_states,
-                    encoder_attention_mask=encoder_extended_attention_mask,
-                    encoder_decoder_position_bias=encoder_decoder_position_bias,
-                    layer_head_mask=layer_head_mask,
-                    cross_attn_layer_head_mask=cross_attn_layer_head_mask,
-                    past_key_value=past_key_value,
-                    use_cache=use_cache,
-                    output_attentions=output_attentions,
-                )
+            layer_outputs = layer_module(
+                hidden_states,
+                attention_mask=extended_attention_mask,
+                position_bias=position_bias,
+                encoder_hidden_states=encoder_hidden_states,
+                encoder_attention_mask=encoder_extended_attention_mask,
+                encoder_decoder_position_bias=encoder_decoder_position_bias,
+                layer_head_mask=layer_head_mask,
+                cross_attn_layer_head_mask=cross_attn_layer_head_mask,
+                past_key_value=past_key_value,
+                use_cache=use_cache,
+                output_attentions=output_attentions,
+            )
 
             # layer_outputs is a tuple with:
             # hidden-states, key-value-states, (self-attention position bias), (self-attention weights), (cross-attention position bias), (cross-attention weights)
@@ -489,173 +410,6 @@ class T5StackYMT3(T5PreTrainedModel):
         )
 
 
-class T5EncoderYMT3(T5PreTrainedModel):
-    # _keys_to_ignore_on_load_missing = [r"encoder.embed_tokens.weight"]
-
-    def __init__(
-        self, encoder_config: Optional[Dict] = None, config: Optional[T5Config] = None
-    ):
-        if config is None:
-            config = T5Config()
-        if encoder_config is not None:
-            config = copy.deepcopy(config)
-            config.update(encoder_config)
-
-        if hasattr(config, "ff_widening_factor"):
-            config.d_ff = int(config.d_model) * int(config.ff_widening_factor)
-
-        config.is_decoder = False
-        config.use_cache = False
-        config.is_encoder_decoder = False
-
-        super().__init__(config)
-        self.model_dim = config.d_model
-
-        self.encoder = T5StackYMT3(config)
-
-        # Initialize weights and apply final processing
-        self.post_init()
-
-    """temporary fix for torch.compile issue"""
-
-    def forward(self, **kwargs):
-        if self.training is True:
-            return self._forward_compile(**kwargs)
-        else:
-            return self._forward_no_compile(**kwargs)
-
-    def _forward_no_compile(self, **kwargs):
-        return self._forward(**kwargs)
-
-    @torch.compile
-    def _forward_compile(self, **kwargs):
-        return self._forward(**kwargs)
-
-    def _forward(
-        self,
-        attention_mask: Optional[torch.FloatTensor] = None,
-        head_mask: Optional[torch.FloatTensor] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
-    ) -> Union[Tuple[torch.FloatTensor], BaseModelOutput]:
-        return_dict = (
-            return_dict if return_dict is not None else self.config.use_return_dict
-        )
-
-        # Encode
-        encoder_outputs = self.encoder(
-            inputs_embeds=inputs_embeds,
-            attention_mask=attention_mask,
-            head_mask=head_mask,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
-        )
-
-        if not return_dict:
-            return encoder_outputs
-        else:
-            return BaseModelOutput(
-                last_hidden_state=encoder_outputs[0],
-                hidden_states=encoder_outputs[1] if len(encoder_outputs) > 1 else None,
-                attentions=encoder_outputs[2] if len(encoder_outputs) > 2 else None,
-            )
-
-
-class T5DecoderYMT3(T5PreTrainedModel):
-
-    def __init__(
-        self, decoder_config: Optional[Dict] = None, config: Optional[T5Config] = None
-    ):
-        if config is None:
-            config = T5Config()
-        if decoder_config is not None:
-            config = copy.deepcopy(config)
-            config.update(decoder_config)
-
-        if hasattr(config, "ff_widening_factor"):
-            config.d_ff = int(config.d_model) * int(config.ff_widening_factor)
-
-        config.is_decoder = True
-        config.is_encoder_decoder = False
-
-        super().__init__(config)
-        self.model_dim = config.d_model
-
-        self.decoder = T5StackYMT3(config)
-
-        # Initialize weights and apply final processing
-        self.post_init()
-
-    """temporary fix for torch.compile issue"""
-
-    def forward(self, **kwargs):
-        if self.training is True:
-            return self._forward_compile(**kwargs)
-        else:
-            return self._forward_no_compile(**kwargs)
-
-    def _forward_no_compile(self, **kwargs):
-        return self._forward(**kwargs)
-
-    @torch.compile
-    def _forward_compile(self, **kwargs):
-        return self._forward(**kwargs)
-
-    def _forward(
-        self,
-        # input_ids: torch.LongTensor, # removed since embed_tokens is outside the decoder
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        attention_mask: Optional[torch.FloatTensor] = None,  # decoder_attention_mask
-        encoder_attention_mask: Optional[torch.FloatTensor] = None,
-        cross_attn_head_mask: Optional[torch.Tensor] = None,
-        head_mask: Optional[torch.FloatTensor] = None,
-        encoder_hidden_states: Optional[torch.FloatTensor] = None,
-        past_key_values: Optional[Tuple[Tuple[torch.Tensor]]] = None,
-        use_cache: Optional[bool] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
-    ) -> Union[Tuple[torch.FloatTensor], BaseModelOutputWithPastAndCrossAttentions]:
-        use_cache = use_cache if use_cache is not None else self.config.use_cache
-        return_dict = (
-            return_dict if return_dict is not None else self.config.use_return_dict
-        )
-
-        if isinstance(encoder_hidden_states, BaseModelOutput):
-            encoder_hidden_states = encoder_hidden_states.last_hidden_state
-
-        # Decode
-        decoder_outputs = self.decoder(
-            inputs_embeds=inputs_embeds,
-            attention_mask=attention_mask,
-            past_key_values=past_key_values,
-            encoder_hidden_states=encoder_hidden_states,
-            encoder_attention_mask=encoder_attention_mask,
-            head_mask=head_mask,
-            cross_attn_head_mask=cross_attn_head_mask,
-            use_cache=use_cache,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
-        )
-
-        if not return_dict:
-            return decoder_outputs
-        else:
-            return BaseModelOutputWithPastAndCrossAttentions(
-                last_hidden_state=decoder_outputs[0],
-                past_key_values=decoder_outputs[1],
-                hidden_states=decoder_outputs[2] if len(decoder_outputs) > 2 else None,
-                attentions=decoder_outputs[3] if len(decoder_outputs) > 3 else None,
-                cross_attentions=(
-                    decoder_outputs[4] if len(decoder_outputs) > 4 else None
-                ),
-            )
-
-
 class MultiChannelT5Decoder(T5PreTrainedModel):
 
     def __init__(
@@ -683,19 +437,7 @@ class MultiChannelT5Decoder(T5PreTrainedModel):
         # Initialize weights and apply final processing
         self.post_init()
 
-    """temporary fix for torch.compile issue"""
-
     def forward(self, **kwargs):
-        if self.training is True:
-            return self._forward_compile(**kwargs)
-        else:
-            return self._forward_no_compile(**kwargs)
-
-    def _forward_no_compile(self, **kwargs):
-        return self._forward(**kwargs)
-
-    @torch.compile
-    def _forward_compile(self, **kwargs):
         return self._forward(**kwargs)
 
     def _forward(

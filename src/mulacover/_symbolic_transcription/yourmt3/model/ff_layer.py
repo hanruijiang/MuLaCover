@@ -7,45 +7,15 @@
 #     http://www.apache.org/licenses/LICENSE-2.0
 #
 # Please see the details in the LICENSE file.
-"""ff_layer.py
+"""Sparse mixture-of-experts feedforward layers."""
 
-This module contains the implementation of the feedforward layers.
-
-    Supported ff_layer_type:
-        'mlp': Multi-Layer Perceptron
-        'gmlp': Gated Multi-Layer Perceptron, simplified version of Mixtral Expert with num_experts=1 and top_k=1.
-                This is not the spatial gating MLP (https://arxiv.org/abs/2105.08050).
-        'moe': Mixtral of Experts, modified from the original source code:
-            https://github.com/huggingface/transformers/blob/v4.38.2/src/transformers/models/mixtral/modeling_mixtral.py
-
-    Usage:
-        from mulacover._symbolic_transcription.yourmt3.model.ff_layer import get_ff_layer
-
-        config = PerceiverTFConfig() # or any type of PretrainedConfig()
-        config.ff_layer_type = 'moe' # or 'mlp'
-        config.moe_num_experts = 4
-        config.moe_topk = 2
-        config.hidden_act = 'gelu' # or any type of activation function, e.g., 'silu'
-
-        ff_layer = get_ff_layer(config, input_size, widening_factor)
-
-    What ff_layer returns:
-        - It returns (hidden_states, router_logits) for MoE and (hidden_states, None) for MLP.
-        - router_logits has the shape of (batch_size * sequence_length, n_experts) for MoE.
-
-
-"""
-
-from typing import Any, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from transformers.configuration_utils import PretrainedConfig
 from transformers.activations import ACT2FN
-from mulacover._symbolic_transcription.yourmt3.model.ops import get_layer_norm
 from mulacover._symbolic_transcription.yourmt3.model.ops import (
     optional_compiler_disable,
-    optional_compiler_dynamic,
 )
 
 
@@ -161,75 +131,5 @@ class MixtralSparseMoeBlock(nn.Module):
         return final_hidden_states, router_logits
 
 
-class MLP(nn.Module):
-    """A Standard Transformer-style dense module to follow attention."""
-
-    def __init__(self, config: PretrainedConfig, input_size: int, widening_factor: int):
-        super().__init__()
-        self.dense1 = nn.Linear(input_size, widening_factor * input_size)
-        self.dense2 = nn.Linear(widening_factor * input_size, input_size)
-
-        if isinstance(config.hidden_act, str):
-            self.intermediate_act_fn = ACT2FN[config.hidden_act]
-        else:
-            self.intermediate_act_fn = config.hidden_act
-
-    def forward(self, hidden_states: torch.Tensor) -> Tuple[torch.Tensor, Any]:
-        hidden_states = self.dense1(hidden_states)
-        hidden_states = self.intermediate_act_fn(hidden_states)
-        hidden_states = self.dense2(hidden_states)
-        return hidden_states, None
-
-
-class SimpleGMLP(nn.Module):
-    """A Simple Gated Multilayer Perceptron (aka. 'gmlp'), without the spatial gating mechanism.
-
-    Note that this is not the spatial gating MLP (https://arxiv.org/abs/2105.08050).
-    - A simplified MLP w/ gating mechanism adapted from Mixtral Expert, as when
-    the number of experts and top_k are both set to 1.)
-    - Added a dropout layer.
-    - This was also used in T5 v1.1.
-    """
-
-    def __init__(self, config: PretrainedConfig, input_size: int, widening_factor: int):
-        super().__init__()
-        self.hidden_dim = input_size
-        self.ffn_dim = int(input_size * widening_factor)
-
-        self.w1 = nn.Linear(self.hidden_dim, self.ffn_dim, bias=False)
-        self.w2 = nn.Linear(self.ffn_dim, self.hidden_dim, bias=False)
-        self.gate = nn.Linear(self.hidden_dim, self.ffn_dim, bias=False)
-        self.act_fn = ACT2FN[config.hidden_act]
-        self.dropout1 = nn.Dropout(config.dropout_rate)
-        self.dropout2 = nn.Dropout(config.dropout_rate)
-
-    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        current_hidden_states = self.act_fn(self.w1(hidden_states)) * self.gate(
-            hidden_states
-        )
-        current_hidden_states = self.dropout1(current_hidden_states)
-        current_hidden_states = self.w2(current_hidden_states)
-        current_hidden_states = self.dropout2(
-            current_hidden_states
-        )  # Residual connection is applied outside of this module.
-        return current_hidden_states, None
-
-
 def get_ff_layer(config: PretrainedConfig, input_size: int, widening_factor: int):
-    if config.ff_layer_type == "moe":
-        assert (
-            hasattr(config, "moe_num_experts")
-            and hasattr(config, "moe_topk")
-            and hasattr(config, "hidden_act")
-        )
-        return MixtralSparseMoeBlock(config, input_size, widening_factor)
-    elif config.ff_layer_type == "mlp":
-        assert hasattr(config, "hidden_act")
-        return MLP(config, input_size, widening_factor)
-    elif config.ff_layer_type == "gmlp":
-        assert hasattr(config, "hidden_act")
-        return SimpleGMLP(config, input_size, widening_factor)
-    else:
-        raise ValueError(
-            f"Unsupported ff_layer_type: {config.ff_layer_type}. Supported types are 'moe', 'mlp' and 'gmlp'."
-        )
+    return MixtralSparseMoeBlock(config, input_size, widening_factor)

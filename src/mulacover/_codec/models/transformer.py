@@ -40,15 +40,6 @@ class RotaryEmbedding(nn.Module):
         self._cache[key] = (sin, cos)
         return sin, cos
 
-    def apply_rotary(
-        self, x: torch.Tensor, sin: torch.Tensor, cos: torch.Tensor
-    ) -> torch.Tensor:
-        x1, x2 = x[..., : self.dim // 2], x[..., self.dim // 2 : self.dim]
-        # Interleave sin/cos across pairs
-        x_rot = torch.stack((-x2, x1), dim=-1).reshape_as(x[..., : self.dim])
-        return (x[..., : self.dim] * cos.unsqueeze(-1)).reshape_as(
-            x[..., : self.dim]
-        ) + (x_rot * sin.unsqueeze(-1)).reshape_as(x[..., : self.dim])
 
 
 class LlamaAttention(nn.Module):
@@ -470,32 +461,3 @@ class TimestepEmbedding(nn.Module):
         x = self.act(x)
         x = self.linear_2(x)
         return x
-
-
-class Timesteps(nn.Module):
-    def __init__(
-        self,
-        num_channels: int,
-        flip_sin_to_cos: bool = True,
-        downscale_freq_shift: float = 0,
-    ):
-        super().__init__()
-        self.num_channels = num_channels
-        self.flip_sin_to_cos = flip_sin_to_cos
-        self.downscale_freq_shift = downscale_freq_shift
-
-    def forward(self, timesteps: torch.Tensor) -> torch.Tensor:
-        half_dim = self.num_channels // 2
-        exponent = (
-            -math.log(10000)
-            * torch.arange(0, half_dim, device=timesteps.device)
-            / (half_dim - self.downscale_freq_shift)
-        )
-        emb = torch.exp(exponent)[None, :] * timesteps[:, None]
-        if self.flip_sin_to_cos:
-            emb = torch.cat([torch.cos(emb), torch.sin(emb)], dim=-1)
-        else:
-            emb = torch.cat([torch.sin(emb), torch.cos(emb)], dim=-1)
-        if self.num_channels % 2 == 1:
-            emb = torch.nn.functional.pad(emb, (0, 1))
-        return emb

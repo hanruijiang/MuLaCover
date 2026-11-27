@@ -37,11 +37,8 @@ class HeartCodec(PreTrainedModel):
         )
         self.scalar_model = ScalarModel(
             num_bands=config.num_bands,
-            sample_rate=config.sample_rate,
             causal=config.causal,
             num_samples=config.num_samples,
-            downsample_factors=config.downsample_factors,
-            downsample_kernel_sizes=config.downsample_kernel_sizes,
             upsample_factors=config.upsample_factors,
             upsample_kernel_sizes=config.upsample_kernel_sizes,
             latent_hidden_dim=config.latent_hidden_dim,
