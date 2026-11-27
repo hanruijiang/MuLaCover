@@ -54,7 +54,15 @@ class MelodyTranscriber:
         audio_path = Path(audio_path)
         if not audio_path.is_file():
             raise FileNotFoundError(f"Reference audio not found: {audio_path}")
-        samples, sample_rate = sf.read(audio_path, dtype="float32", always_2d=True)
+        try:
+            samples, sample_rate = sf.read(audio_path, dtype="float32", always_2d=True)
+        except sf.LibsndfileError:
+            import librosa
+
+            samples, sample_rate = librosa.load(
+                str(audio_path), sr=None, mono=False, dtype=np.float32
+            )
+            samples = np.atleast_2d(samples).T
         if samples.shape[0] == 0 or not np.isfinite(samples).all():
             raise ValueError("Reference audio must contain finite, nonempty samples")
         audio = torch.from_numpy(samples.mean(axis=1))

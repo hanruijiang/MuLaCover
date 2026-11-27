@@ -7,8 +7,7 @@ through the `mulacover` command.
 ## Installation
 
 Requirements: Linux, Python 3.10, an NVIDIA GPU and a compatible driver.
-The previously verified environment was Ubuntu 24.04, PyTorch 2.10.0 / CUDA
-13.0 and NVIDIA B300. For audio input/output, install FFmpeg and libsndfile.
+Environment: Ubuntu 24.04, PyTorch 2.10.0 / CUDA 13.0 and NVIDIA B300. For audio input/output, install FFmpeg and libsndfile. Reference audio supports WAV, FLAC, OGG and MP3; other formats such as M4A/AAC depend on the available decoder.
 
 ```bash
 sudo apt-get update
@@ -38,9 +37,7 @@ mulacover --help
 ```
 
 PyTorch 2.6 or newer is required by the restricted YourMT3 checkpoint loader.
-Use matching PyTorch and torchaudio versions for reference audio. The commands
-retain torchvision from the previously verified environment; its omission has
-not been validated. On a machine with conflicting CUDA libraries
+Use matching PyTorch and torchaudio versions for reference audio. On a machine with conflicting CUDA libraries
 (e.g. a Deep Learning AMI), prefix the inference command with
 `env -u LD_LIBRARY_PATH` if cuBLAS reports an invalid handle or a missing symbol.
 

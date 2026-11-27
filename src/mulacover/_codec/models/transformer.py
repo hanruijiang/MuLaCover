@@ -40,15 +40,6 @@ class RotaryEmbedding(nn.Module):
         self._cache[key] = (sin, cos)
         return sin, cos
 
-    def apply_rotary(
-        self, x: torch.Tensor, sin: torch.Tensor, cos: torch.Tensor
-    ) -> torch.Tensor:
-        x1, x2 = x[..., : self.dim // 2], x[..., self.dim // 2 : self.dim]
-        # Interleave sin/cos across pairs
-        x_rot = torch.stack((-x2, x1), dim=-1).reshape_as(x[..., : self.dim])
-        return (x[..., : self.dim] * cos.unsqueeze(-1)).reshape_as(
-            x[..., : self.dim]
-        ) + (x_rot * sin.unsqueeze(-1)).reshape_as(x[..., : self.dim])
 
 
 class LlamaAttention(nn.Module):

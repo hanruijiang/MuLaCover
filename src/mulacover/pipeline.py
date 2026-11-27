@@ -92,6 +92,23 @@ def _read_text(value, name):
     return value
 
 
+def _check_weights(name, info, ignore_unexpected=()):
+    problems = {
+        key: info.get(key, [])
+        for key in ("missing_keys", "mismatched_keys", "error_msgs")
+        if info.get(key)
+    }
+    unexpected = [
+        key for key in info.get("unexpected_keys", [])
+        if not key.startswith(ignore_unexpected)
+    ]
+    if unexpected:
+        problems["unexpected_keys"] = unexpected
+    if problems:
+        raise ValueError(f"{name} checkpoint: {problems}")
+
+
+
 class MuLaCoverGenPipeline:
     """A single-song pipeline with audio and symbolic input modes.
 
@@ -140,29 +157,22 @@ class MuLaCoverGenPipeline:
                 local_files_only=True,
                 output_loading_info=True,
             )
-            missing_style = [
-                name for name in loading_info["missing_keys"]
-                if name.startswith("tag_mlp_layers.")
-            ]
-            if model.config.train_tag and missing_style:
-                raise ValueError(
-                    "This MuLaCover checkpoint is missing StyleMLP weights. "
-                    "Download a complete MuLaCover model release containing "
-                    "the StyleMLP weights; incomplete checkpoints cannot "
-                    "reproduce the intended style conditioning."
-                )
+            _check_weights("MuLaCover", loading_info)
             self._mulacover = model.eval()
         return self._mulacover
 
     @property
     def codec(self):
         if self._codec is None:
-            self._codec = HeartCodec.from_pretrained(
+            model, loading_info = HeartCodec.from_pretrained(
                 self.paths["codec"],
                 device_map=self.devices["codec"],
                 dtype=self.dtypes["codec"],
                 local_files_only=True,
-            ).eval()
+                output_loading_info=True,
+            )
+            _check_weights("HeartCodec", loading_info, ("scalar_model.encoder.",))
+            self._codec = model.eval()
         return self._codec
 
     def _load_qwen(self):
@@ -172,15 +182,14 @@ class MuLaCoverGenPipeline:
             self._qwen_tokenizer = AutoTokenizer.from_pretrained(
                 self.paths["qwen"], padding_side="left", local_files_only=True
             )
-            self._qwen = (
-                AutoModel.from_pretrained(
-                    self.paths["qwen"],
-                    dtype=self.dtypes["qwen"],
-                    local_files_only=True,
-                )
-                .to(self.devices["qwen"])
-                .eval()
+            model, loading_info = AutoModel.from_pretrained(
+                self.paths["qwen"],
+                dtype=self.dtypes["qwen"],
+                local_files_only=True,
+                output_loading_info=True,
             )
+            _check_weights("Qwen3", loading_info)
+            self._qwen = model.to(self.devices["qwen"]).eval()
 
     def _release(self, name):
         if not self.lazy_load:
