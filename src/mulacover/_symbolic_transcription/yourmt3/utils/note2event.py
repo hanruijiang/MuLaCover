@@ -7,55 +7,7 @@
 #     http://www.apache.org/licenses/LICENSE-2.0
 #
 # Please see the details in the LICENSE file.
-"""note2event.py
-
-Note tools:
-• mix_notes(notes_to_mix, sort, trim_overlap, fix_offset)
-    -> List[Note]
-• validate_notes(notes, fix)
-    -> List[Note]
-• trim_overlapping_notes(notes, sort)
-    -> List[Note]
-• sort_notes(notes)
-    -> List[Note]
-• notes2pc_notes(notes, note_offs)
-    -> List[Note]
-• extract_program_from_notes(notes)
-    -> Set[int]
-• extract_notes_selected_by_programs(notes, programs, sort)
-    -> List[Note]
-
-Note to NoteEvent
-• note2note_event(notes, sort, return_activity)
-    -> List[NoteEvent]
-
-NoteEvent tools:
-• slice_note_events_and_ties(note_events, start_time, end_time, tidyup)
-    -> Tuple[List[NoteEvent], List[NoteEvent], int])
-• slice_multiple_note_events_and_ties_to_bundle(note_events, start_times, duration_sec, tidyup)
-    -> List[List[NoteEvent], List[NoteEvent], int]] # Note implmented yet..
-• mix_note_event_lists_bundle(note_events_to_mix, sort, start_time_to_zero)
-    -> NoteEventListsBundle
-• pitch_shift_note_events(note_events, semitone, use_deepcopy)
-    -> List[NoteEvent]
-• separate_by_subunit_programs_from_note_event_lists_bundle(
-        source_note_event_lists_bundle,
-        subunit_programs)
-    -> NoteEventListsBundle:
-• separate_channel_by_program_group_from_note_event_lists_bundle(
-        source_note_event_lists_bundle,
-        num_program_groups,
-        program2channel_vocab)
-    -> List[NoteEventListsBundle]:
-
-NoteEvent to Event:
-• note_event2event(note_events, tie_note_events, start_time, tps, sort)
-    -> List[Event]
-
-Event tools:
-• check_event_len_from_bundle(note_events_dic_a, note_events_dic_b, max_len, fast_check)
-    -> bool
-"""
+"""Note merging, validation and overlap trimming."""
 
 import warnings
 from itertools import chain
@@ -134,11 +86,8 @@ def validate_notes(
                         f"✅\033[92m Fixed! Setting offset to onset + {MINIMUM_OFFSET_TIME}.\033[0m"
                     )
             elif note.is_drum is False and note.offset - note.onset < 0.01:
-                # fix 13 Oct: too short notes issue for the dataset with non-MIDI annotations
-                # warnings.warn(f'📙 Note at {note} has offset - onset < 0.01.')
                 if fix:
                     note.offset = note.onset + MINIMUM_OFFSET_TIME
-                    # print(f'✅\033[92m Fixed! Setting offset to onset + {MINIMUM_OFFSET_TIME}.\033[0m')
 
     return notes
 
@@ -146,8 +95,6 @@ def validate_notes(
 def trim_overlapping_notes(notes: List[Note], sort: bool = True) -> List[Note]:
     """Trim overlapping notes and dropping zero-length notes.
     https://github.com/magenta/mt3/blob/3deffa260ba7de3cf03cda1ea513a4d7ba7144ca/mt3/note_sequences.py#L52
-
-    Trimming was only applied to train set, not test set in MT3.
     """
     if len(notes) <= 1:
         return notes
@@ -187,17 +134,3 @@ def trim_overlapping_notes(notes: List[Note], sort: bool = True) -> List[Note]:
     return trimmed_notes
 
 
-def sort_notes(notes: List[Note]) -> List[Note]:
-    """Sort notes by increasing order of onsets, and at the same timing, by increasing order of program and pitch."""
-    if len(notes) > 0:
-        notes.sort(
-            key=lambda note: (
-                note.onset,
-                note.is_drum,
-                note.program,
-                note.velocity,
-                note.pitch,
-                note.offset,
-            )
-        )
-    return notes
