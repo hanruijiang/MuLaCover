@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "mulacover"
 version = "0.1.0"
-description = "Controllable AI cover-song and music-remix generation from reference audio or symbolic MIDI."
+description = "Command-line cover-song inference from reference audio or symbolic MIDI."
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "Apache-2.0"}
@@ -30,14 +30,14 @@ dependencies = [
 audio = [
     "torchaudio>=2.4,<2.11",
     "librosa>=0.10.2,<0.12",
-    "scipy>=1.10,<2",
+    "packaging>=20",
 ]
 
 [project.scripts]
 mulacover = "mulacover.cli:main"
 
 [tool.setuptools]
-license-files = ["LICENSE", "LICENSING.md", "MODEL_LICENSE"]
+license-files = ["LICENSE", "LICENSING.md", "MODEL_LICENSE", "THIRD_PARTY_NOTICES.md"]
 
 [tool.setuptools.package-data]
 "mulacover._symbolic_transcription" = ["**/*.txt", "**/*.md", "**/LICENSE*"]
