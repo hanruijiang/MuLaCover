@@ -7,59 +7,11 @@
 #     http://www.apache.org/licenses/LICENSE-2.0
 #
 # Please see the details in the LICENSE file.
-"""vocabulary.py
+"""Instrument and drum vocabularies for transcription."""
 
-Vocabulary for instrument classes. Vocabulary can be used as train_vocab
-or test_vocab in data_presets.py or train.py arguments.
-
-- When it is used as train_vocab, it maps the instrument classes to the first
-  program number of the class. For example, if you use 'GM_INSTR_CLASS' as
-  train_vocab, then the program number of 'Piano' is [0,1,2,3,4,5,6,7]. These
-  program numbers are trained as program [0] in the model.
-
-  - When it is used as eval_vocab, any program number in the instrument class
-  is considered as correct.
-
-
-MUSICNET_INSTR_CLASS: 3 classes used for MusicNet benchmark
-GM_INSTR_CLASS: equivalent to 'MIDI Class' defined by MT3.
-GM_INSTR_CLASS_PLUS: GM_INSTR_CLASS + singing voice
-GM_INSTR_FULL: 128 GM instruments, which is extended from 'MT3_FULL'
-MT3_FULL: this matches the class names in Table 3 of MT3 paper
-ENST_DRUM_NOTES: 20 drum notes used in ENST dataset
-GM_DRUM_NOTES: 45 GM drum notes with percussions
-
-Program 128 is reserved for 'drum' internally.
-Program 129 is reserved for 'unannotated', internally.
-Program 100 is reserved for 'singing voice (melody)' in GM_INSTR_CLASS_PLUS.
-Program 101 is reserved for 'singing voice (chorus)' in GM_INSTR_CLASS_PLUS.
-
-
-"""
-
-# yapf: disable
 import numpy as np
 
-GM_INSTR_CLASS = {
-    "Piano": np.arange(0, 8),
-    "Chromatic Percussion": np.arange(8, 16),
-    "Organ": np.arange(16, 24),
-    "Guitar": np.arange(24, 32),
-    "Bass": np.arange(32, 40),
-    "Strings": np.arange(40, 56),  # Strings + Ensemble
-    # "Strings": np.arange(40, 48),
-    # "Ensemble": np.arange(48, 56),
-    "Brass": np.arange(56, 64),
-    "Reed": np.arange(64, 72),
-    "Pipe": np.arange(72, 80),
-    "Synth Lead": np.arange(80, 88),
-    "Synth Pad": np.arange(88, 96),
-}
-
-GM_INSTR_CLASS_PLUS = GM_INSTR_CLASS.copy()
-GM_INSTR_CLASS_PLUS["Singing Voice"] = [100, 101]
-
-MT3_FULL = { # this matches the class names in Table 3 of MT3 paper 
+MT3_FULL = {
     "Acoustic Piano": [0, 1, 3, 6, 7],
     "Electric Piano": [2, 4, 5],
     "Chromatic Percussion": np.arange(8, 16),
@@ -112,9 +64,8 @@ GM_DRUM_NOTES = {
     "Low Tom": [45],
     "Low-Mid Tom": [47],
     "Mid Tom": [48],
-    "Low Tom (Rim)": [50],  # TD-17: 47, 50, 58  
+    "Low Tom (Rim)": [50],
     "Mid Tom (Rim)": [58],
-    # "Ride Cymbal": [51, 53, 59],
     "Ride": [51],
     "Ride (Bell)": [53],  # https://youtu.be/b94hZoM5s3k?t=323
     "Ride (Edge)": [59],
@@ -125,7 +76,6 @@ GM_DRUM_NOTES = {
 
 program_vocab_presets = {
     "mt3_full_plus": MT3_FULL_PLUS,
-    "gm_plus": GM_INSTR_CLASS_PLUS,
 }
 
 drum_vocab_presets = {"gm": GM_DRUM_NOTES}

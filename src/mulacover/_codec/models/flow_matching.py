@@ -139,11 +139,8 @@ class FlowMatching(nn.Module):
             mu (torch.Tensor): output of encoder
                 shape: (batch_size, n_feats, mel_timesteps)
         """
-        t, _, dt = t_span[0], t_span[-1], t_span[1] - t_span[0]
+        t, dt = t_span[0], t_span[1] - t_span[0]
         noise = x.clone()
-        # I am storing this because I can later plot it by putting a debugger here and saving it to a file
-        # Or in future might add like a return_all_steps flag
-        sol = []
         for step in tqdm(range(1, len(t_span)), disable=disable_progress):
             x[:, 0:incontext_length, :] = (1 - (1 - 1e-6) * t) * noise[
                 :, 0:incontext_length, :
@@ -171,10 +168,7 @@ class FlowMatching(nn.Module):
 
             x = x + dt * dphi_dt
             t = t + dt
-            sol.append(x)
             if step < len(t_span) - 1:
                 dt = t_span[step + 1] - t
 
-        result = sol[-1]
-
-        return result
+        return x

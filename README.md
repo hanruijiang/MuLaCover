@@ -7,12 +7,13 @@ through the `mulacover` command.
 ## Installation
 
 Requirements: Linux, Python 3.10, an NVIDIA GPU and a compatible driver.
-Environment: Ubuntu 24.04, PyTorch 2.10.0 / CUDA 13.0 and NVIDIA B300. For audio input/output, install FFmpeg and libsndfile. Reference audio supports WAV, FLAC, OGG and MP3; other formats such as M4A/AAC depend on the available decoder.
+The installation below uses PyTorch 2.10.0 and CUDA 13.0.
+Install FFmpeg and libsndfile for audio processing.
 
 ```bash
 sudo apt-get update
 sudo apt-get install -y ffmpeg libsndfile1
-git clone https://github.com/hanruijiang/MuLaCover.git
+git clone --branch cleanup/cli-inference-only https://github.com/hanruijiang/MuLaCover.git
 cd MuLaCover
 conda create -y -n mulacover python=3.10 pip
 conda activate mulacover
@@ -36,10 +37,7 @@ python -m pip install -e .
 mulacover --help
 ```
 
-PyTorch 2.6 or newer is required by the restricted YourMT3 checkpoint loader.
-Use matching PyTorch and torchaudio versions for reference audio. On a machine with conflicting CUDA libraries
-(e.g. a Deep Learning AMI), prefix the inference command with
-`env -u LD_LIBRARY_PATH` if cuBLAS reports an invalid handle or a missing symbol.
+Use matching PyTorch and torchaudio versions for reference audio.
 
 ## Checkpoints
 
@@ -104,6 +102,7 @@ mulacover \
 `--drum_midi` is optional. MIDI timing is read in musical beats.
 
 ### From reference audio
+Reference audio accepts WAV, FLAC, OGG and MP3. M4A and AAC can be decoded through FFmpeg when supported by the installed audio backend.
 
 ```bash
 mulacover \

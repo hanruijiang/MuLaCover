@@ -29,8 +29,6 @@ class HeartCodecConfig(PretrainedConfig):
         sample_rate: int = 48000,
         causal: bool = True,
         num_samples: int = 2,
-        downsample_factors: List[int] = [3, 4, 4, 4, 5],
-        downsample_kernel_sizes: List[int] = [6, 8, 8, 8, 10],
         upsample_factors: List[int] = [5, 4, 4, 4, 3],
         upsample_kernel_sizes: List[int] = [10, 8, 8, 8, 6],
         latent_hidden_dim: int = 128,
@@ -62,8 +60,6 @@ class HeartCodecConfig(PretrainedConfig):
         self.sample_rate = sample_rate
         self.causal = causal
         self.num_samples = num_samples
-        self.downsample_factors = downsample_factors
-        self.downsample_kernel_sizes = downsample_kernel_sizes
         self.upsample_factors = upsample_factors
         self.upsample_kernel_sizes = upsample_kernel_sizes
         self.latent_hidden_dim = latent_hidden_dim

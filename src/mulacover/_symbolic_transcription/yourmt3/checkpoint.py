@@ -1,21 +1,17 @@
-"""Restricted loading of tensor weights from historical YourMT3 checkpoints."""
+"""Load YourMT3 tensor weights."""
 
 import numpy as np
 import torch
 
 
-class _LegacyMetadata:
+class _CheckpointMetadata:
     """Inert holder for discarded tokenizer metadata."""
 
 
 def load_state_dict(path):
-    """Read tensor weights without importing historical checkpoint classes.
-
-    Known tokenizer metadata is mapped to inert holders and discarded. There is
-    no fallback to unrestricted pickle deserialization.
-    """
+    """Read the state dictionary, ignoring tokenizer metadata."""
     aliases = [
-        (_LegacyMetadata, name)
+        (_CheckpointMetadata, name)
         for name in (
             "utils.task_manager.TaskManager",
             "utils.tokenizer.NoteEventTokenizer",
@@ -24,7 +20,7 @@ def load_state_dict(path):
             "utils.note_event_dataclasses.Event",
         )
     ]
-    core = np._core if hasattr(np, "_core") else np.core
+    core = np._core
     aliases.extend(
         [
             core.multiarray._reconstruct,
