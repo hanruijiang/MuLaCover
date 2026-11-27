@@ -11,7 +11,7 @@
 
 import torch
 from torch import nn
-from typing import Optional, Dict
+from typing import Dict
 
 
 class LMHead(nn.Module):

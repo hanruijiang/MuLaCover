@@ -1,14 +1,13 @@
 """positional_encoding.py"""
 
 from typing import Optional, Literal
-from inspect import isfunction
-from math import log, log2, pi, floor
+from math import log, log2, floor
 
 import numpy as np
 import torch
 import torch.nn.functional as F
-from torch import nn, einsum
-from einops import rearrange, repeat
+from torch import nn
+from einops import rearrange
 
 from mulacover._symbolic_transcription.yourmt3.model.RoPE.RoPE import RotaryEmbedding
 
@@ -201,97 +200,6 @@ class FixedSinusoidalPositionalEmbedding(nn.Embedding):
         return super().forward(positions)
 
 
-class Wav2Vec2ConformerRotaryPositionalEmbedding(nn.Module):
-    """Rotary positional embedding
-    Reference : https://blog.eleuther.ai/rotary-embeddings/ Paper: https://arxiv.org/pdf/2104.09864.pdf
-    """
-
-    def __init__(self, config):
-        super().__init__()
-        dim = config.d_model // config.num_heads
-        base = config.rotary_embedding_base
-
-        inv_freq = 1.0 / (base ** (torch.arange(0, dim, 2).float() / dim))
-        self.register_buffer("inv_freq", inv_freq)
-        self.cached_sequence_length = None
-        self.cached_rotary_positional_embedding = None
-
-    def forward(self, hidden_states):
-        sequence_length = hidden_states.shape[1]
-
-        if (
-            sequence_length == self.cached_sequence_length
-            and self.cached_rotary_positional_embedding is not None
-        ):
-            return self.cached_rotary_positional_embedding
-
-        self.cached_sequence_length = sequence_length
-        time_stamps = torch.arange(sequence_length).type_as(self.inv_freq)
-        freqs = torch.einsum("i,j->ij", time_stamps, self.inv_freq)
-        embeddings = torch.cat((freqs, freqs), dim=-1)
-
-        cos_embeddings = embeddings.cos()[:, None, None, :]
-        sin_embeddings = embeddings.sin()[:, None, None, :]
-        self.cached_rotary_positional_embedding = torch.stack(
-            [cos_embeddings, sin_embeddings]
-        )
-        return self.cached_rotary_positional_embedding
-
-
-class Wav2Vec2ConformerRelPositionalEmbedding(nn.Module):
-    """Relative positional encoding module."""
-
-    def __init__(self, config):
-        super().__init__()
-        self.max_len = config.num_max_positions
-        self.d_model = config.d_model
-        self.pe = None
-        self.extend_pe(torch.tensor(0.0).expand(1, self.max_len))
-
-    def extend_pe(self, x):
-        # Reset the positional encodings
-        if self.pe is not None:
-            # self.pe contains both positive and negative parts
-            # the length of self.pe is 2 * input_len - 1
-            if self.pe.size(1) >= x.size(1) * 2 - 1:
-                if self.pe.dtype != x.dtype or self.pe.device != x.device:
-                    self.pe = self.pe.to(dtype=x.dtype, device=x.device)
-                return
-        # Suppose `i` is the position of query vector and `j` is the
-        # position of key vector. We use positive relative positions when keys
-        # are to the left (i>j) and negative relative positions otherwise (i<j).
-        pe_positive = torch.zeros(x.size(1), self.d_model)
-        pe_negative = torch.zeros(x.size(1), self.d_model)
-        position = torch.arange(0, x.size(1), dtype=torch.float32).unsqueeze(1)
-        div_term = torch.exp(
-            torch.arange(0, self.d_model, 2, dtype=torch.float32)
-            * -(log(10000.0) / self.d_model)
-        )
-        pe_positive[:, 0::2] = torch.sin(position * div_term)
-        pe_positive[:, 1::2] = torch.cos(position * div_term)
-        pe_negative[:, 0::2] = torch.sin(-1 * position * div_term)
-        pe_negative[:, 1::2] = torch.cos(-1 * position * div_term)
-
-        # Reverse the order of positive indices and concat both positive and
-        # negative indices. This is used to support the shifting trick
-        # as in https://arxiv.org/abs/1901.02860
-        pe_positive = torch.flip(pe_positive, [0]).unsqueeze(0)
-        pe_negative = pe_negative[1:].unsqueeze(0)
-        pe = torch.cat([pe_positive, pe_negative], dim=1)
-        self.pe = pe.to(device=x.device, dtype=x.dtype)
-
-    def forward(self, hidden_states: torch.Tensor):
-        self.extend_pe(hidden_states)
-        start_idx = self.pe.size(1) // 2 - hidden_states.size(1) + 1
-        end_idx = self.pe.size(1) // 2 + hidden_states.size(1)
-        relative_position_embeddings = self.pe[:, start_idx:end_idx]
-
-        return relative_position_embeddings
-
-
-# ================================================================================================
-# Rotary Positional Embedding
-# ================================================================================================
 def get_rotary_emb(
     d_by_head: int,
     freqs_for: Literal["l", "lang", "p", "pixel"],

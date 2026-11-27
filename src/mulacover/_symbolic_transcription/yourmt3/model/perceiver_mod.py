@@ -17,7 +17,7 @@ Implementation of the PerceiverTF encoder with:
 
 import math
 from einops import rearrange
-from typing import Optional, Tuple, Union, List, Dict, Literal
+from typing import Optional, Tuple, Union, Literal
 
 import torch
 from torch import nn

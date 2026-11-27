@@ -42,10 +42,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from transformers.configuration_utils import PretrainedConfig
 from transformers.activations import ACT2FN
-from mulacover._symbolic_transcription.yourmt3.model.ops import get_layer_norm
 from mulacover._symbolic_transcription.yourmt3.model.ops import (
     optional_compiler_disable,
-    optional_compiler_dynamic,
 )
 
 

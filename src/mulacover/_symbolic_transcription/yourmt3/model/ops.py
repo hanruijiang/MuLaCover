@@ -9,12 +9,10 @@
 # Please see the details in the LICENSE file.
 """op.py"""
 
-import math
 from packaging.version import parse as VersionParse
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from einops import rearrange
 from .t5_compat import T5LayerNorm as RMSNorm
 
@@ -38,10 +36,6 @@ def get_layer_norm(
         return nn.LayerNorm(normalized_shape=dim, eps=layer_norm_eps)
 
 
-def check_all_elements_equal(x: torch.Tensor) -> bool:
-    return x.eq(x[0]).all().item()
-
-
 def minmax_normalize(x: torch.Tensor, eps: float = 0.008) -> torch.FloatTensor:
     """Min-max normalization:
 
@@ -59,48 +53,6 @@ def minmax_normalize(x: torch.Tensor, eps: float = 0.008) -> torch.FloatTensor:
     return (x - x_min) / (x_max - x_min + eps)
 
 
-def count_parameters(model):
-    num_trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    num_params = sum(p.numel() for p in model.parameters())
-    return num_trainable_params, num_params
-
-
-def adjust_b_to_gcd(a, b, min_gcd=16):
-    """
-    Adjust the value of b to ensure the GCD(a, b) is at least min_gcd with minimum change to b.
-
-    Parameters:
-    - a (int): A positive integer
-    - b (int): A positive integer
-    - min_gcd (int): The minimum desired GCD
-
-    Returns:
-    - int: The adjusted value of b
-    """
-    current_gcd = math.gcd(a, b)
-
-    # If current GCD is already greater than or equal to min_gcd, return b as it is.
-    if current_gcd >= min_gcd:
-        return b
-
-    # If a is less than min_gcd, then it's impossible to get a GCD of at least min_gcd.
-    if a < min_gcd:
-        raise ValueError("a must be at least as large as min_gcd.")
-
-    # Adjust b by trying increments and decrements, preferring the smallest absolute change.
-    adjusted_b_up = b
-    adjusted_b_down = b
-
-    while True:
-        adjusted_b_up += 1
-        adjusted_b_down -= 1
-
-        if math.gcd(a, adjusted_b_up) >= min_gcd:
-            return adjusted_b_up
-        elif math.gcd(a, adjusted_b_down) >= min_gcd:
-            return adjusted_b_down
-
-
 def optional_compiler_disable(func):
     if VersionParse(torch.__version__) >= VersionParse("2.1"):
         # If the version is 2.1 or higher, apply the torch.compiler.disable decorator.
@@ -108,7 +60,3 @@ def optional_compiler_disable(func):
     else:
         # If the version is below 2.1, return the original function.
         return func
-
-
-def optional_compiler_dynamic(func):
-    return torch.compile(func, dynamic=True)

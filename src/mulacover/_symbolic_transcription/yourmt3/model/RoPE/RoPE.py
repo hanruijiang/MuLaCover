@@ -1,11 +1,11 @@
 """rotary_embedding.py - Rotary Embedding based on https://github.com/lucidrains/rotary-embedding-torch"""
 
 from typing import Literal, Union, Optional
-from math import pi, log
+from math import pi
 from einops import rearrange, repeat
 
 import torch
-from torch.nn import Module, ModuleList
+from torch.nn import Module
 from torch.amp import autocast
 from torch import nn, einsum, broadcast_tensors, Tensor
 
@@ -57,16 +57,6 @@ def apply_rotary_emb(freqs, t, start_index=0, scale=1.0, seq_dim=-2):
 
 
 # learned rotation helpers
-def apply_learned_rotations(rotations, t, start_index=0, freq_ranges=None):
-    if exists(freq_ranges):
-        rotations = einsum("..., f -> ... f", rotations, freq_ranges)
-        rotations = rearrange(rotations, "... r f -> ... (r f)")
-
-    rotations = repeat(rotations, "... n -> ... (n r)", r=2)
-    return apply_rotary_emb(rotations, t, start_index=start_index)
-
-
-# classes
 class RotaryEmbedding(Module):
 
     def __init__(
